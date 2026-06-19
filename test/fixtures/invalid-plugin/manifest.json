@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "Com.Example.BAD",
+  "name": "תוסף שגוי",
+  "version": "1.0",
+  "author": "דוגמה",
+  "entrypoint": "does-not-exist.js",
+  "permissions": [
+    "library.findBooks",
+    "totally.made.up"
+  ],
+  "contributes": {
+    "toolTab": {
+      "title": "תוסף שגוי",
+      "iconName": "BadIcon"
+    }
+  }
+}

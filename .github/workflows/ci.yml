@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm test
+
+  self-test-valid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate a known-good plugin
+        uses: ./
+        with:
+          path: test/fixtures/valid-plugin
+
+  self-test-invalid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: A known-bad plugin must fail
+        id: bad
+        continue-on-error: true
+        uses: ./
+        with:
+          path: test/fixtures/invalid-plugin
+      - name: Assert it failed
+        if: steps.bad.outcome == 'success'
+        run: |
+          echo "Expected the invalid plugin to fail validation, but it passed."
+          exit 1

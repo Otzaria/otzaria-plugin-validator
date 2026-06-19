@@ -1,0 +1,49 @@
+name: 'Otzaria Plugin Validator'
+description: 'Validate Otzaria plugins (manifest, permissions, API usage, design) against the live SDK reference — the same checks as the Otzaria store.'
+author: 'Otzaria'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  path:
+    description: >-
+      Path to validate. Can be a single plugin directory (containing manifest.json),
+      a directory holding many plugins (monorepo), a bare manifest.json, or a packaged
+      .otzplugin file. Defaults to the repository root.
+    required: false
+    default: '.'
+  fail-on-warnings:
+    description: >-
+      When 'true', warnings (unknown API/event, missing permission, etc.) fail the
+      run too — matching the Otzaria store upload, which blocks on warnings. When
+      'false' (default), only blocking errors fail the run, matching the packager CLI.
+    required: false
+    default: 'false'
+  app-version:
+    description: >-
+      Optional Otzaria app version. When set, minAppVersion/maxAppVersion are checked
+      against it (blocking). When empty (default), version compatibility is skipped,
+      like the packager does.
+    required: false
+    default: ''
+  api-reference-url:
+    description: >-
+      Override the URL of the official API_REFERENCE.md fetched in real time. Defaults
+      to Otzaria/otzaria@dev. On fetch failure a built-in fallback list is used.
+    required: false
+    default: ''
+
+outputs:
+  passed:
+    description: "'true' if validation passed, 'false' otherwise."
+  total-plugins:
+    description: 'Number of plugins discovered and validated.'
+  total-errors:
+    description: 'Total blocking errors found across all plugins.'
+  total-warnings:
+    description: 'Total warnings found across all plugins.'
+
+runs:
+  using: 'node20'
+  main: 'src/index.js'

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.warnings",
+  "name": "תוסף עם אזהרות",
+  "version": "1.0.0",
+  "author": "דוגמה",
+  "description": "מבנה תקין אך משתמש ב-API ללא הרשאה וב-API לא מוכר",
+  "minAppVersion": "0.9.89",
+  "entrypoint": "index.js",
+  "permissions": []
+}

@@ -1,0 +1,23 @@
+{
+  "name": "otzaria-plugin-validator",
+  "version": "1.0.0",
+  "description": "GitHub Action to validate Otzaria plugins against the live SDK reference.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "validate": "node src/cli.js"
+  },
+  "keywords": [
+    "otzaria",
+    "plugin",
+    "validator",
+    "github-action"
+  ],
+  "author": "Otzaria",
+  "license": "MIT",
+  "dependencies": {}
+}

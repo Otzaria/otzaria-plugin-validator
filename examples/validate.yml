@@ -1,0 +1,21 @@
+# Example workflow for an Otzaria plugin repository.
+# Copy to .github/workflows/validate.yml in your plugin repo.
+name: Validate plugin
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Otzaria plugin
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          # Path to your plugin. Defaults to the repo root.
+          path: .
+          # Set to true to also fail on warnings (matches the store upload).
+          fail-on-warnings: false
