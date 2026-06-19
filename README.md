@@ -1,108 +1,117 @@
-# Otzaria Plugin Validator
+# Otzaria Plugin Validator &amp; Publisher
 
-> דע שהתוסף תקין **לפני** שאתה מעלה לחנות — אותן בדיקות בדיוק, ישר ב‑CI.
+> מאמת את התוסף ו**מפרסם אותו אוטומטית לחנות אוצריא** — push אחד ל‑main, והגרסה החדשה בדרך לחנות.
 >
-> Know your plugin is valid **before** you upload it to the store — the exact same checks, right in CI.
+> Validate an Otzaria plugin and **auto‑publish it to the Otzaria store** — one push, one new version live.
 
-[![Validate](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml)
+[![CI](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml)
 
 ---
 
-## למה זה קיים
-
-החנות דוחה תוסף לא תקין **רק אחרי** שטרחת לארוז, להעלות ולחכות — ואז אתה מתחיל מהתחלה.
-ה‑Action הזה מזיז את אותה בדיקה אחורה: הוא רץ על כל push / PR ונותן לך **ירוק = הכל תקין,
-מותר להעלות** או **אדום = מה בדיוק לתקן** — עוד לפני שהגעת בכלל למסך ההעלאה.
-
-לא עוד "להעלות ולקוות". מקמפלים, רואים שאין שגיאות, ורק אז שולחים לחנות.
-
 ## מה זה עושה
 
-GitHub Action שמריץ ולידציה מלאה על תוסף אוצריא — או על מספר תוספים בו‑זמנית — ומסמן
-שגיאות ואזהרות ישירות על הקובץ ב‑Pull Request. **התשובה זהה לבית ספרה** לזו שתקבל בחנות,
-כי הלוגיקה היא פורט מדויק (1:1) של:
+GitHub Action אחד שעושה את כל מסלול ההפצה של תוסף אוצריא:
 
-- `PluginManifestValidator` ו‑`PluginExtendedValidator` שבפרויקט [Otzaria/otzaria](https://github.com/Otzaria/otzaria) (סקריפט האריזה `pack-plugin`).
-- ולידטור החנות (`pluginValidation.js`) שרץ בעת העלאת תוסף.
+1. **מאמת** — אותן בדיקות בדיוק שרצות בעת אריזה (`pack-plugin`) ובהעלאה לחנות. נכשל על שגיאות, מצביע על מה לתקן.
+2. **בונה** — אורז `.otzplugin` תקני מתיקיית התוסף (מכבד תיקיות פיתוח כמו `node_modules`/`.git`).
+3. **מפרסם לחנות** — דוחף את הגרסה החדשה ל‑[otzaria.org](https://otzaria.org) אוטומטית, כשמוגדרים הסודות.
+
+**המטרה: לא להיכנס לחנות ידנית בכל עדכון.** מעדכנים את `manifest.json`, דוחפים ל‑main, וה‑Action
+מאמת → בונה → מפרסם. הפרסום מתבצע **רק** כשהסודות מוגדרים ו**לעולם לא** באירוע `pull_request`.
 
 **רשימת ה‑APIים, ההרשאות והאירועים נמשכת בזמן אמת** מ‑`docs/plugin-sdk/API_REFERENCE.md`
-שבריפו הרשמי (ענף `dev`) — בדיוק כמו בבדיקה האוטומטית בחנות. כך תוסף שמשתמש ב‑API חדש
-שתועד זה עתה יעבור, ואילו נפילת רשת חוזרת לרשימת fallback מובנית כדי שה‑CI לעולם לא יישבר.
+שבריפו הרשמי (ענף `dev`) — בדיוק כמו בבדיקה האוטומטית בחנות. נפילת רשת חוזרת לרשימת fallback מובנית.
 
-> רוצה התאמה מלאה להחלטת החנות (שגם אזהרה חוסמת)? הוסף `fail-on-warnings: true` —
-> ואז ירוק ב‑CI מבטיח שגם החנות תקבל את התוסף.
+## הגדרה — פרסום אוטומטי לחנות
 
-## שימוש מהיר
+הוסף שלושה **Secrets** ב‑`Settings → Secrets and variables → Actions` בריפו של התוסף:
+
+| Secret | מה זה |
+|---|---|
+| `OTZARIA_USER` | אימייל / שם משתמש של חשבון החנות (היוצר של התוסף). |
+| `OTZARIA_PASSWORD` | הסיסמה לאותו חשבון. |
+| `OTZARIA_PLUGIN_ID` | מזהה התוסף בחנות — ה‑id הפנימי מדף ניהול התוסף שלך (לא ה‑`id` שב‑manifest). |
+
+ואז workflow שרץ רק על push ל‑main / tag:
 
 ```yaml
-# .github/workflows/validate.yml
-name: Validate plugin
-on: [push, pull_request]
+# .github/workflows/release.yml
+name: Publish plugin
+on:
+  push:
+    branches: [main]
 
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          path: .
+          otzaria-user: ${{ secrets.OTZARIA_USER }}
+          otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
+          otzaria-plugin-id: ${{ secrets.OTZARIA_PLUGIN_ID }}
+```
+
+זהו. כל push ל‑main שמעלה את הגרסה ב‑`manifest.json` → מאמת, בונה, ודוחף לחנות.
+אם הגרסה כבר קיימת בחנות, הפרסום מדולג. ה‑Action בלבד לא יוצר GitHub Release —
+[ראו workflow מלא עם release](examples/release.yml) שמשלב גם את זה.
+
+> ⚠️ **שני דברים שחשוב לדעת על הפרסום:**
+> - **עדכון של בעלים ממתין לאישור מנהל** לפני שהוא עולה לחנות. ה‑Action ידחוף בהצלחה ויסמן `pending-approval=true`, אך הפרסום בפועל אינו מיידי.
+> - **חובה עליית גרסה** מעל הקיימת בחנות, אחרת הדחיפה תיכשל.
+
+## רק אימות (PR checks)
+
+בלי הסודות ה‑Action פשוט מאמת — מושלם כבדיקת PR. אזהרות מוצגות אך אינן מפילות:
+
+```yaml
+on: [pull_request]
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: Otzaria/otzaria-plugin-validator@v1
+        # אין סודות → publish=auto מדלג, מאמת בלבד. בכל מקרה פרסום חסום ב‑pull_request.
 ```
 
-זהו. ברירת המחדל סורקת את כל הריפו, מגלה כל `manifest.json` או קובץ `.otzplugin`,
-ונכשלת רק על שגיאות חוסמות (אזהרות מוצגות אך אינן מפילות) — בדיוק כמו ה‑CLI.
-
-## דוגמאות
-
-תוסף בתת‑תיקייה, עם כשל גם על אזהרות (התנהגות זהה ל‑העלאה לחנות):
-
-```yaml
-      - uses: Otzaria/otzaria-plugin-validator@v1
-        with:
-          path: plugins/my-plugin
-          fail-on-warnings: true
-```
-
-בדיקת תאימות לגרסת אוצריא מסוימת (מפעיל את בדיקת `minAppVersion`/`maxAppVersion`):
-
-```yaml
-      - uses: Otzaria/otzaria-plugin-validator@v1
-        with:
-          path: my-plugin
-          app-version: '0.9.95'
-```
-
-בדיקת קובץ ארוז:
-
-```yaml
-      - uses: Otzaria/otzaria-plugin-validator@v1
-        with:
-          path: dist/my-plugin-1.0.0.otzplugin
-```
-
-מונורפו עם כמה תוספים — פשוט הצביעו על תיקיית האב (או השאירו ברירת מחדל):
-
-```yaml
-      - uses: Otzaria/otzaria-plugin-validator@v1
-        with:
-          path: plugins
-```
+קלטים שימושיים נוספים: `fail-on-warnings: true` (אזהרות מפילות, כמו החנות),
+`app-version: '0.9.95'` (בדיקת `minAppVersion`/`maxAppVersion`), `path` (תיקיית תוסף / מונורפו / `.otzplugin`).
 
 ## קלטים (inputs)
 
 | קלט | ברירת מחדל | תיאור |
 |---|---|---|
-| `path` | `.` | תיקיית תוסף, תיקיית‑אב עם כמה תוספים, `manifest.json`, או קובץ `.otzplugin`. |
+| `path` | `.` | תיקיית תוסף, תיקיית‑אב עם כמה תוספים, `manifest.json`, או קובץ `.otzplugin`. פרסום דורש תיקיית תוסף בודדת. |
 | `fail-on-warnings` | `false` | `true` — אזהרות מפילות את הריצה (כמו החנות). `false` — רק שגיאות מפילות (כמו ה‑CLI). |
-| `app-version` | `''` | גרסת אוצריא לבדיקת תאימות `minAppVersion`/`maxAppVersion`. ריק = דילוג (כמו האריזה). |
+| `app-version` | `''` | גרסת אוצריא לבדיקת תאימות `minAppVersion`/`maxAppVersion`. ריק = דילוג. |
 | `api-reference-url` | `''` | דריסת כתובת ה‑`API_REFERENCE.md` הנמשך בזמן אמת. |
+| `publish` | `auto` | `auto` = פרסם רק אם שלושת הסודות קיימים; `true` = חייב לפרסם (שגיאה אם חסר סוד); `false` = אימות בלבד. תמיד מדולג ב‑`pull_request`. |
+| `otzaria-user` | `''` | חשבון החנות (Secret). נדרש לפרסום. |
+| `otzaria-password` | `''` | סיסמת החנות (Secret). נדרש לפרסום. |
+| `otzaria-plugin-id` | `''` | מזהה התוסף בחנות (Secret). נדרש לפרסום. |
+| `base-url` | `https://otzaria.org` | כתובת הבסיס של החנות. |
+| `output` | `''` | שם קובץ ה‑`.otzplugin` הנבנה. ברירת מחדל `{id}-{version}.otzplugin`. |
 
 ## פלטים (outputs)
 
 | פלט | תיאור |
 |---|---|
-| `passed` | `'true'` אם הבדיקה עברה. |
-| `total-plugins` | מספר התוספים שנבדקו. |
-| `total-errors` | סך השגיאות החוסמות. |
-| `total-warnings` | סך האזהרות. |
+| `passed` | `'true'` אם האימות עבר. |
+| `total-plugins` / `total-errors` / `total-warnings` | מונים. |
+| `published` | `'true'` אם נדחף עדכון לחנות. |
+| `pending-approval` | `'true'` אם העדכון שנדחף ממתין לאישור מנהל. |
+| `plugin-file` / `sha256` | נתיב ה‑`.otzplugin` שנבנה ו‑hash שלו. |
+
+## איך הפרסום עובד (ולמה הוא שברירי)
+
+לחנות אין API ייעודי לאוטומציה, לכן ה‑Action מחקה את זרימת הדפדפן: מושך CSRF token,
+מתחבר דרך ה‑Credentials provider של NextAuth כדי לקבל session cookie, ואז שולח `PUT`
+לעדכון התוסף. **זו תלות בפנימיות NextAuth של האתר** (שמות cookies, נתיבי `/api/auth/*`) —
+שדרוג עתידי של האתר עלול לשבור אותה. הפתרון היציב ארוך‑הטווח הוא endpoint פרסום מבוסס‑token
+ייעודי באתר; עד אז, הזרימה הזו עובדת (וזהה לזו שכבר רצה בפועל ב‑release workflows קיימים).
 
 ## מה נבדק
 

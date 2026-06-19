@@ -11,9 +11,15 @@ for (let i = 0; i < args.length; i++) {
   if (a === '--fail-on-warnings') process.env['INPUT_FAIL-ON-WARNINGS'] = 'true'
   else if (a === '--app-version') process.env['INPUT_APP-VERSION'] = args[++i] || ''
   else if (a === '--api-reference-url') process.env['INPUT_API-REFERENCE-URL'] = args[++i] || ''
+  else if (a === '--publish') process.env.INPUT_PUBLISH = args[++i] || 'true'
+  else if (a === '--otzaria-user') process.env['INPUT_OTZARIA-USER'] = args[++i] || ''
+  else if (a === '--otzaria-password') process.env['INPUT_OTZARIA-PASSWORD'] = args[++i] || ''
+  else if (a === '--otzaria-plugin-id') process.env['INPUT_OTZARIA-PLUGIN-ID'] = args[++i] || ''
+  else if (a === '--base-url') process.env['INPUT_BASE-URL'] = args[++i] || ''
   else if (a === '-h' || a === '--help') {
     process.stdout.write(
-      'Usage: node src/cli.js <path> [--fail-on-warnings] [--app-version X] [--api-reference-url U]\n'
+      'Usage: node src/cli.js <path> [--fail-on-warnings] [--app-version X] [--api-reference-url U]\n' +
+      '       [--publish auto|true|false] [--otzaria-user U] [--otzaria-password P] [--otzaria-plugin-id ID] [--base-url URL]\n'
     )
     process.exit(0)
   } else positional.push(a)

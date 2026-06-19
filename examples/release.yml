@@ -1,0 +1,38 @@
+# Full release workflow: validate + build + publish to the Otzaria store,
+# and also attach the built .otzplugin to a GitHub Release.
+# Copy to .github/workflows/release.yml in your plugin repo.
+name: Release plugin
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validate, build the .otzplugin, and publish it to the store.
+      - id: otzaria
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          path: .
+          otzaria-user: ${{ secrets.OTZARIA_USER }}
+          otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
+          otzaria-plugin-id: ${{ secrets.OTZARIA_PLUGIN_ID }}
+
+      # Optional: read the version from manifest.json for the tag.
+      - id: ver
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Optional: attach the built file to a GitHub Release.
+      - if: steps.otzaria.outputs.published == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          files: ${{ steps.otzaria.outputs.plugin-file }}
+          generate_release_notes: true

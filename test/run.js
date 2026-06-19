@@ -7,6 +7,7 @@ const path = require('path')
 
 const { validateSource } = require('../src/validatePlugin')
 const { extractZipFiles } = require('../src/zip')
+const { buildOtzplugin } = require('../src/zipWriter')
 const { buildFallbackSpec, mergeWithFallback, parseApiReferenceMarkdown } = require('../src/apiSpec')
 
 const spec = mergeWithFallback(buildFallbackSpec())
@@ -146,6 +147,38 @@ test('zip-based plugin validates end to end', () => {
   fs.writeFileSync(tmp, buf)
   const r = validateSource({ kind: 'zip', file: tmp }, opts)
   assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('zipWriter builds a deflate archive that the reader round-trips', () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'built.otzplugin')
+  const res = buildOtzplugin(fx('valid-plugin'), out)
+  assert.ok(res.fileCount >= 3, `expected >=3 files, got ${res.fileCount}`)
+  assert.match(res.sha256, /^[0-9a-f]{64}$/)
+  const files = extractZipFiles(fs.readFileSync(out))
+  const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
+  assert.strictEqual(manifest.id, 'com.example.hello')
+  assert.ok(files.get('index.js').toString('utf8').includes('app.getInfo'))
+})
+
+test('built archive passes validation end to end', () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'built.otzplugin')
+  buildOtzplugin(fx('valid-plugin'), out)
+  const r = validateSource({ kind: 'zip', file: out }, opts)
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('zipWriter skips dev directories', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), '{"id":"x"}')
+  fs.mkdirSync(path.join(tmp, 'node_modules'))
+  fs.writeFileSync(path.join(tmp, 'node_modules', 'junk.js'), 'x')
+  fs.mkdirSync(path.join(tmp, '.git'))
+  fs.writeFileSync(path.join(tmp, '.git', 'config'), 'x')
+  const out = path.join(tmp, 'out.otzplugin')
+  buildOtzplugin(tmp, out)
+  const files = extractZipFiles(fs.readFileSync(out))
+  assert.ok(files.has('manifest.json'))
+  assert.ok(![...files.keys()].some((n) => n.includes('node_modules') || n.includes('.git')))
 })
 
 test('API reference markdown parser extracts methods and permissions', () => {
