@@ -1,5 +1,5 @@
 name: 'Otzaria Plugin Validator'
-description: 'Validate Otzaria plugins (manifest, permissions, API usage, design) against the live SDK reference — the same checks as the Otzaria store.'
+description: 'Validate Otzaria plugins against the live SDK reference using the same checks as the Otzaria store.'
 author: 'Otzaria'
 branding:
   icon: 'check-circle'
