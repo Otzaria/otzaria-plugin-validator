@@ -9,7 +9,7 @@ const { validateSource } = require('../src/validatePlugin')
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
-const { resolveUpdateFields } = require('../src/publish')
+const { resolveUpdateFields, imageContentType } = require('../src/publish')
 const { buildFallbackSpec, mergeWithFallback, parseApiReferenceMarkdown } = require('../src/apiSpec')
 
 const spec = mergeWithFallback(buildFallbackSpec())
@@ -240,6 +240,13 @@ test('publish syncs metadata fields from manifest (admin-equivalent update)', ()
   // curated fields preserved
   assert.strictEqual(f.description, 'long curated store description')
   assert.strictEqual(f.tags, JSON.stringify(['a', 'b']))
+})
+
+test('screenshot content-type is inferred from extension', () => {
+  assert.strictEqual(imageContentType('a/b/shot.png'), 'image/png')
+  assert.strictEqual(imageContentType('shot.JPG'), 'image/jpeg')
+  assert.strictEqual(imageContentType('shot.webp'), 'image/webp')
+  assert.strictEqual(imageContentType('shot.bin'), 'application/octet-stream')
 })
 
 test('publish preserves store fields when sync-metadata is off', () => {

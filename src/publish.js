@@ -86,105 +86,125 @@ function resolveUpdateFields({ manifest, current, syncMetadata }) {
   }
 }
 
-/**
- * @param {object} args
- * @param {string} args.baseUrl       store base, e.g. https://otzaria.org
- * @param {string} args.user          OTZARIA_USER (email or username)
- * @param {string} args.password      OTZARIA_PASSWORD
- * @param {string} args.pluginId      OTZARIA_PLUGIN_ID (the store's Mongo _id)
- * @param {string} args.pluginFile    path to the built .otzplugin
- * @param {object} args.manifest      normalized manifest (has .raw, .version, .minAppVersion)
- * @param {boolean} [args.syncMetadata=true]  push manifest-derived fields (name/author/
- *   stability/minAppVersion/homepage/network) into the form. Owners derive these from the
- *   manifest server-side regardless; this is what makes an ADMIN update sync them too
- *   (admins otherwise keep the existing store fields). The long store description and tags
- *   are always preserved.
- * @param {boolean} [args.force=false] publish even if the store already has this version
- *   (admins may re-upload the same version; owners must bump and the server enforces it).
- * @param {(m:string)=>void} args.log
- * @returns {Promise<{published:boolean, skipped:boolean, pendingApproval:boolean, message:string}>}
- */
-async function publishToStore({ baseUrl, user, password, pluginId, pluginFile, manifest, syncMetadata = true, force = false, log = () => {} }) {
-  const version = manifest.version
-  const base = (baseUrl || 'https://otzaria.org').replace(/\/+$/, '')
-  const jar = new CookieJar()
+const IMAGE_CONTENT_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' }
+function imageContentType(file) {
+  const ext = path.extname(file).slice(1).toLowerCase()
+  return IMAGE_CONTENT_TYPES[ext] || 'application/octet-stream'
+}
 
-  // 1) CSRF token.
-  const csrfRes = await fetchWithCookies(jar, `${base}/api/auth/csrf`, {
-    headers: { 'User-Agent': 'otzaria-plugin-validator-action' },
-  })
-  if (!csrfRes.ok) throw new Error(`קבלת CSRF נכשלה: HTTP ${csrfRes.status}`)
-  const { csrfToken } = await csrfRes.json()
-  if (!csrfToken) throw new Error('לא התקבל csrfToken מהשרת')
-
-  // 2) Credentials login.
-  const loginBody = new URLSearchParams({
-    csrfToken,
-    identifier: user,
-    password,
-    callbackUrl: `${base}/`,
-    json: 'true',
-  })
-  await fetchWithCookies(jar, `${base}/api/auth/callback/credentials`, {
-    method: 'POST',
-    body: loginBody,
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    redirect: 'manual',
-  })
-
-  // 3) Verify session.
-  const sessionRes = await fetchWithCookies(jar, `${base}/api/auth/session`)
-  const session = await sessionRes.json().catch(() => ({}))
-  if (!session || !session.user) {
-    throw new Error('ההתחברות נכשלה: session ריק (בדוק את OTZARIA_USER / OTZARIA_PASSWORD)')
-  }
-  log(`מחובר כ-${session.user.email || session.user.name || 'משתמש'}`)
-
-  // 4) Current plugin fields.
-  const editUrl = `${base}/api/admin/plugins/${encodeURIComponent(pluginId)}/edit`
-  const currentRes = await fetchWithCookies(jar, editUrl)
-  if (currentRes.status === 401) throw new Error('אין הרשאה (401) — ה-session לא תקף')
-  if (currentRes.status === 403) throw new Error('אין בעלות על התוסף (403) — המשתמש אינו היוצר/מנהל')
-  if (currentRes.status === 404) throw new Error(`התוסף ${pluginId} לא נמצא בחנות (404) — בדוק את OTZARIA_PLUGIN_ID`)
-  if (!currentRes.ok) throw new Error(`שליפת התוסף הנוכחי נכשלה: HTTP ${currentRes.status}`)
-  const current = await currentRes.json()
-  log(`גרסה נוכחית בחנות: ${current.version} ← חדשה: ${version}`)
-
-  if (!force && current.version === version) {
-    return { published: false, skipped: true, pendingApproval: false, message: `החנות כבר בגרסה ${version} — דילוג (אפשר לכפות עם force)` }
+// A logged-in store session. One login, reused for resolve/edit/upload across
+// any number of plugins. Mirrors the browser flow (no token API): CSRF →
+// NextAuth credentials login → session cookie. Depends on NextAuth internals.
+class StoreClient {
+  constructor(baseUrl, log = () => {}) {
+    this.base = (baseUrl || 'https://otzaria.org').replace(/\/+$/, '')
+    this.jar = new CookieJar()
+    this.log = log
+    this.user = null
   }
 
-  // 5) Build multipart and PUT.
-  //    Owners: the server derives name/author/stability/minAppVersion/homepage/network
-  //    from the uploaded manifest regardless of these fields.
-  //    Admins: the server uses THESE form fields — so when syncMetadata is on we fill them
-  //    from the manifest, giving admins the same manifest-driven update owners get.
-  //    The long store description and tags are user-curated, so we always preserve them.
-  const fields = resolveUpdateFields({ manifest, current, syncMetadata })
+  async login(user, password) {
+    const csrfRes = await fetchWithCookies(this.jar, `${this.base}/api/auth/csrf`, {
+      headers: { 'User-Agent': 'otzaria-plugin-validator-action' },
+    })
+    if (!csrfRes.ok) throw new Error(`קבלת CSRF נכשלה: HTTP ${csrfRes.status}`)
+    const { csrfToken } = await csrfRes.json()
+    if (!csrfToken) throw new Error('לא התקבל csrfToken מהשרת')
 
-  const buf = fs.readFileSync(pluginFile)
-  const form = new FormData()
-  for (const [k, v] of Object.entries(fields)) form.set(k, v)
-  form.set('pluginFile', new Blob([buf]), path.basename(pluginFile))
+    await fetchWithCookies(this.jar, `${this.base}/api/auth/callback/credentials`, {
+      method: 'POST',
+      body: new URLSearchParams({ csrfToken, identifier: user, password, callbackUrl: `${this.base}/`, json: 'true' }),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      redirect: 'manual',
+    })
 
-  const putRes = await fetchWithCookies(jar, editUrl, { method: 'PUT', body: form })
-  const result = await putRes.json().catch(() => ({}))
-  // Surface the store's full response in the run log for every user.
-  log(`תגובת השרת (HTTP ${putRes.status}): ${JSON.stringify(result)}`)
-  if (!putRes.ok) {
-    const reason = result && result.error ? result.error : `HTTP ${putRes.status}`
-    throw new Error(`העדכון נכשל: ${reason}`)
+    const sessionRes = await fetchWithCookies(this.jar, `${this.base}/api/auth/session`)
+    const session = await sessionRes.json().catch(() => ({}))
+    if (!session || !session.user) {
+      throw new Error('ההתחברות נכשלה: session ריק (בדוק את OTZARIA_USER / OTZARIA_PASSWORD)')
+    }
+    this.user = session.user
+    this.log(`מחובר כ-${session.user.email || session.user.name || 'משתמש'}`)
   }
 
-  const pendingApproval = !!result.pendingApproval
-  return {
-    published: true,
-    skipped: false,
-    pendingApproval,
-    message: pendingApproval
-      ? `העדכון נדחף בהצלחה לגרסה ${version} וממתין לאישור מנהל לפני שיעלה לחנות`
-      : `העדכון פורסם בחנות בגרסה ${version}`,
+  // Resolve a manifest id (pluginUid) to the store's _id. Returns
+  // { exists, owned, id } — id only when owned by the logged-in user/admin.
+  async resolveId(uid) {
+    const res = await fetchWithCookies(this.jar, `${this.base}/api/plugins/resolve?uid=${encodeURIComponent(uid)}`)
+    if (res.status === 404) return { exists: false } // endpoint missing on older sites
+    if (!res.ok) throw new Error(`זיהוי התוסף לפי id נכשל: HTTP ${res.status}`)
+    return res.json()
+  }
+
+  editUrl(id) {
+    return `${this.base}/api/admin/plugins/${encodeURIComponent(id)}/edit`
+  }
+
+  // Update an existing plugin (PUT edit). Skips if the store already has the
+  // version (unless force). See resolveUpdateFields for the admin-sync logic.
+  async edit({ id, pluginFile, manifest, syncMetadata = true, force = false }) {
+    const url = this.editUrl(id)
+    const currentRes = await fetchWithCookies(this.jar, url)
+    if (currentRes.status === 403) throw new Error('אין בעלות על התוסף (403) — החשבון אינו היוצר/מנהל')
+    if (currentRes.status === 404) throw new Error(`התוסף ${id} לא נמצא בחנות (404)`)
+    if (!currentRes.ok) throw new Error(`שליפת התוסף הנוכחי נכשלה: HTTP ${currentRes.status}`)
+    const current = await currentRes.json()
+    this.log(`גרסה נוכחית בחנות: ${current.version} ← חדשה: ${manifest.version}`)
+
+    if (!force && current.version === manifest.version) {
+      return { published: false, skipped: true, pendingApproval: false, message: `החנות כבר בגרסה ${manifest.version} — דילוג (אפשר לכפות עם force)` }
+    }
+
+    const fields = resolveUpdateFields({ manifest, current, syncMetadata })
+    const form = new FormData()
+    for (const [k, v] of Object.entries(fields)) form.set(k, v)
+    form.set('pluginFile', new Blob([fs.readFileSync(pluginFile)]), path.basename(pluginFile))
+
+    const putRes = await fetchWithCookies(this.jar, url, { method: 'PUT', body: form })
+    const result = await putRes.json().catch(() => ({}))
+    this.log(`תגובת השרת (HTTP ${putRes.status}): ${JSON.stringify(result)}`)
+    if (!putRes.ok) throw new Error(`העדכון נכשל: ${result && result.error ? result.error : `HTTP ${putRes.status}`}`)
+
+    const pendingApproval = !!result.pendingApproval
+    return {
+      published: true,
+      skipped: false,
+      pendingApproval,
+      message: pendingApproval
+        ? `העדכון נדחף בהצלחה לגרסה ${manifest.version} וממתין לאישור מנהל לפני שיעלה לחנות`
+        : `העדכון פורסם בחנות בגרסה ${manifest.version}`,
+    }
+  }
+
+  // Create a new plugin (POST upload). The store requires at least one
+  // screenshot — provide screenshot file paths.
+  async upload({ pluginFile, manifest, description, screenshots = [], tags = [] }) {
+    if (!screenshots.length) {
+      throw new Error('דחיפה ראשונה (יצירת תוסף חדש) מחייבת לפחות צילום מסך אחד — ספק אותו דרך הקלט screenshots')
+    }
+    const raw = manifest.raw || {}
+    const form = new FormData()
+    form.set('pluginFile', new Blob([fs.readFileSync(pluginFile)]), path.basename(pluginFile))
+    form.set('description', (description || raw.description || '').toString())
+    form.set('tags', JSON.stringify(Array.isArray(tags) ? tags : []))
+    for (const shot of screenshots) {
+      form.append('screenshots', new Blob([fs.readFileSync(shot)], { type: imageContentType(shot) }), path.basename(shot))
+    }
+
+    const res = await fetchWithCookies(this.jar, `${this.base}/api/plugins/upload`, { method: 'POST', body: form })
+    const result = await res.json().catch(() => ({}))
+    this.log(`תגובת השרת (HTTP ${res.status}): ${JSON.stringify(result)}`)
+    if (!res.ok) throw new Error(`יצירת התוסף נכשלה: ${result && result.error ? result.error : `HTTP ${res.status}`}`)
+
+    return {
+      published: true,
+      created: true,
+      skipped: false,
+      pendingApproval: true, // a new plugin always awaits approval
+      storeId: result.plugin && result.plugin.id ? result.plugin.id : null,
+      message: `התוסף נוצר בחנות בגרסה ${manifest.version} וממתין לאישור מנהל`,
+    }
   }
 }
 
-module.exports = { publishToStore, resolveUpdateFields, CookieJar }
+module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar }

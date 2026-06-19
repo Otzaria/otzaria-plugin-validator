@@ -50,8 +50,22 @@ inputs:
     default: ''
   otzaria-plugin-id:
     description: >-
-      The store plugin id to update (the site''s internal id from your plugin
-      dashboard, not the manifest id). Use a secret. Required to publish.
+      Optional. The store''s internal plugin id. Normally NOT needed — the plugin
+      is identified by the id in its manifest.json (resolved via the store). Set
+      this only to target a specific plugin id explicitly (single plugin only).
+    required: false
+    default: ''
+  screenshots:
+    description: >-
+      Screenshot file paths (comma/newline separated), relative to the plugin
+      directory or repo root. Required only on the FIRST publish of a new plugin
+      (the store mandates at least one screenshot to create a plugin).
+    required: false
+    default: ''
+  description:
+    description: >-
+      Long store description used only when creating a new plugin on first
+      publish. Defaults to the manifest description.
     required: false
     default: ''
   sync-metadata:

@@ -17,13 +17,12 @@ jobs:
       - uses: actions/checkout@v4
 
       # Validate, build the .otzplugin, and publish it to the store.
+      # The plugin is identified by the id in manifest.json — no plugin id needed.
       - id: otzaria
         uses: Otzaria/otzaria-plugin-validator@v1
         with:
-          path: .
           otzaria-user: ${{ secrets.OTZARIA_USER }}
           otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
-          otzaria-plugin-id: ${{ secrets.OTZARIA_PLUGIN_ID }}
 
       # Optional: read the version from manifest.json for the tag.
       - id: ver

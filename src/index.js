@@ -5,8 +5,9 @@ const ga = require('./githubActions')
 const { getApiSpec, mergeWithFallback, DEFAULT_API_REFERENCE_URL } = require('./apiSpec')
 const { discoverPlugins } = require('./discover')
 const { validateSource } = require('./validatePlugin')
+const fs = require('fs')
 const { buildOtzplugin } = require('./zipWriter')
-const { publishToStore } = require('./publish')
+const { StoreClient } = require('./publish')
 
 function readInput(name, fallback = '') {
   const key = `INPUT_${name.toUpperCase().replace(/ /g, '_')}`
@@ -162,78 +163,120 @@ async function main() {
   await maybePublish(validated)
 }
 
-// Build the .otzplugin and push it to the store — only when explicitly enabled
-// (or auto-enabled by the presence of all three secrets) and never on a
-// pull_request event, to keep credentials away from fork PRs.
+// Resolve screenshot input paths (comma/newline separated), relative to the
+// plugin dir first, then the repo root. Used only for first-publish (create).
+function resolveScreenshots(raw, pluginRoot) {
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((rel) => {
+      const inPlugin = path.resolve(pluginRoot, rel)
+      if (fs.existsSync(inPlugin)) return inPlugin
+      return path.resolve(process.cwd(), rel)
+    })
+    .filter((p) => fs.existsSync(p))
+}
+
+// Build each plugin and publish it to the store — only when enabled (auto =
+// secrets present) and never on a pull_request event, to keep credentials away
+// from fork PRs. Identifies plugins by their manifest id (resolve), so no
+// store id is needed; falls back to create (upload) on first publish.
 async function maybePublish(validated) {
   const mode = readInput('publish', 'auto').trim().toLowerCase()
   if (mode === 'false' || mode === 'off' || mode === 'no') return
 
   const user = readInput('otzaria-user', '').trim()
   const password = readInput('otzaria-password', '').trim()
-  const pluginId = readInput('otzaria-plugin-id', '').trim()
+  const explicitId = readInput('otzaria-plugin-id', '').trim()
   const baseUrl = readInput('base-url', 'https://otzaria.org').trim()
-  const secretsPresent = user !== '' && password !== '' && pluginId !== ''
+  const credsPresent = user !== '' && password !== ''
 
-  if (mode === 'auto' && !secretsPresent) return // validate-only, no secrets configured
+  if (mode === 'auto' && !credsPresent) return // validate-only, no credentials configured
 
   const eventName = process.env.GITHUB_EVENT_NAME || ''
   if (eventName === 'pull_request' || eventName === 'pull_request_target') {
     ga.warning('פרסום לחנות מבוטל באירוע pull_request מטעמי אבטחה. הפעל פרסום רק על push/tag/release.')
     return
   }
-  if (!secretsPresent) {
-    ga.error('פרסום הופעל אך חסרים סודות: נדרשים otzaria-user, otzaria-password ו-otzaria-plugin-id.')
+  if (!credsPresent) {
+    ga.error('פרסום הופעל אך חסרים סודות: נדרשים otzaria-user ו-otzaria-password.')
     process.exitCode = 1
     return
   }
 
   const dirPlugins = validated.filter((v) => v.source.kind === 'dir' && v.report.manifest)
-  if (dirPlugins.length !== 1) {
-    ga.error(
-      `פרסום לחנות דורש בדיוק תוסף אחד (תיקייה עם manifest), נמצאו ${dirPlugins.length}. ` +
-      'הצבע על תיקיית התוסף הבודדת באמצעות הקלט path.'
-    )
+  if (dirPlugins.length === 0) {
+    ga.error('פרסום לחנות דורש תיקיית תוסף אחת לפחות עם manifest. הצבע עליה עם הקלט path.')
+    process.exitCode = 1
+    return
+  }
+  if (explicitId && dirPlugins.length > 1) {
+    ga.error('otzaria-plugin-id ניתן רק כשמפרסמים תוסף יחיד. השמט אותו כדי לזהות לפי ה-id שב-manifest.')
     process.exitCode = 1
     return
   }
 
-  const { source, report } = dirPlugins[0]
-  const manifest = report.manifest
-  const outputName = readInput('output', '').trim() || `${manifest.id}-${manifest.version}.otzplugin`
+  const syncMetadata = readBool('sync-metadata', true)
+  const force = readBool('force', false)
+  const description = readInput('description', '').trim()
+  const screenshotsRaw = readInput('screenshots', '')
 
-  ga.startGroup(`פרסום לחנות: ${manifest.name} (${manifest.version})`)
+  const client = new StoreClient(baseUrl, (m) => ga.info(m))
   try {
-    const built = buildOtzplugin(source.root, path.resolve(source.root, '..', outputName))
-    ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים, ${built.bytes} בתים`)
-    ga.info(`SHA-256: ${built.sha256}`)
-    ga.setOutput('plugin-file', built.path)
-    ga.setOutput('sha256', built.sha256)
-
-    const res = await publishToStore({
-      baseUrl,
-      user,
-      password,
-      pluginId,
-      pluginFile: built.path,
-      manifest,
-      syncMetadata: readBool('sync-metadata', true),
-      force: readBool('force', false),
-      log: (m) => ga.info(m),
-    })
-    ga.setOutput('published', res.published ? 'true' : 'false')
-    ga.setOutput('pending-approval', res.pendingApproval ? 'true' : 'false')
-    if (res.published && res.pendingApproval) {
-      ga.notice(res.message)
-    } else {
-      ga.info(`✓ ${res.message}`)
-    }
+    await client.login(user, password)
   } catch (e) {
-    ga.error(`פרסום לחנות נכשל: ${e.message}`)
+    ga.error(`התחברות לחנות נכשלה: ${e.message}`)
     process.exitCode = 1
-  } finally {
-    ga.endGroup()
+    return
   }
+
+  let anyPublished = false
+  let anyPending = false
+  for (const { source, report } of dirPlugins) {
+    const manifest = report.manifest
+    const outputName = readInput('output', '').trim() || `${manifest.id}-${manifest.version}.otzplugin`
+    ga.startGroup(`פרסום לחנות: ${manifest.name} (${manifest.version})`)
+    try {
+      const built = buildOtzplugin(source.root, path.resolve(source.root, '..', outputName))
+      ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים, ${built.bytes} בתים`)
+      ga.info(`SHA-256: ${built.sha256}`)
+      ga.setOutput('plugin-file', built.path)
+      ga.setOutput('sha256', built.sha256)
+
+      // Determine the store id: explicit input, or resolve by manifest id.
+      let id = explicitId || null
+      if (!id) {
+        const r = await client.resolveId(manifest.id)
+        if (r.exists && r.owned === false) {
+          throw new Error(`קיים בחנות תוסף עם id "${manifest.id}" שאינו בבעלות חשבון זה`)
+        }
+        if (r.exists) id = r.id
+      }
+
+      let res
+      if (id) {
+        res = await client.edit({ id, pluginFile: built.path, manifest, syncMetadata, force })
+      } else {
+        const screenshots = resolveScreenshots(screenshotsRaw, source.root)
+        res = await client.upload({ pluginFile: built.path, manifest, description, screenshots, tags: [] })
+        if (res.storeId) ga.info(`מזהה התוסף החדש בחנות: ${res.storeId}`)
+      }
+
+      if (res.published) anyPublished = true
+      if (res.pendingApproval) anyPending = true
+      if (res.published && res.pendingApproval) ga.notice(res.message)
+      else ga.info(`✓ ${res.message}`)
+    } catch (e) {
+      ga.error(`פרסום לחנות נכשל: ${e.message}`)
+      process.exitCode = 1
+    } finally {
+      ga.endGroup()
+    }
+  }
+
+  ga.setOutput('published', anyPublished ? 'true' : 'false')
+  ga.setOutput('pending-approval', anyPending ? 'true' : 'false')
 }
 
 main().catch((e) => {

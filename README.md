@@ -24,15 +24,14 @@ GitHub Action אחד שעושה את כל מסלול ההפצה של תוסף א
 
 ## הגדרה — פרסום אוטומטי לחנות
 
-הוסף שלושה **Secrets** ב‑`Settings → Secrets and variables → Actions` בריפו של התוסף:
+הוסף שני **Secrets** בלבד ב‑`Settings → Secrets and variables → Actions` בריפו של התוסף:
 
 | Secret | מה זה |
 |---|---|
 | `OTZARIA_USER` | אימייל / שם משתמש של חשבון החנות (היוצר של התוסף). |
 | `OTZARIA_PASSWORD` | הסיסמה לאותו חשבון. |
-| `OTZARIA_PLUGIN_ID` | מזהה התוסף בחנות — ה‑id הפנימי מדף ניהול התוסף שלך (לא ה‑`id` שב‑manifest). |
 
-ואז workflow שרץ רק על push ל‑main / tag:
+**אין צורך במזהה תוסף** — התוסף מזוהה אוטומטית לפי ה‑`id` שב‑`manifest.json`. ואז workflow מינימלי:
 
 ```yaml
 # .github/workflows/release.yml
@@ -48,19 +47,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Otzaria/otzaria-plugin-validator@v1
         with:
-          path: .
           otzaria-user: ${{ secrets.OTZARIA_USER }}
           otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
-          otzaria-plugin-id: ${{ secrets.OTZARIA_PLUGIN_ID }}
 ```
 
 זהו. כל push ל‑main שמעלה את הגרסה ב‑`manifest.json` → מאמת, בונה, ודוחף לחנות.
-אם הגרסה כבר קיימת בחנות, הפרסום מדולג. ה‑Action בלבד לא יוצר GitHub Release —
-[ראו workflow מלא עם release](examples/release.yml) שמשלב גם את זה.
+אם הגרסה כבר קיימת בחנות, הפרסום מדולג. ה‑Action תומך גם במונורפו (כמה תוספים) — כל אחד
+מזוהה לפי ה‑`id` שלו.
 
-> ⚠️ **שני דברים שחשוב לדעת על הפרסום:**
-> - **עדכון של בעלים ממתין לאישור מנהל** לפני שהוא עולה לחנות. ה‑Action ידחוף בהצלחה ויסמן `pending-approval=true`, אך הפרסום בפועל אינו מיידי.
-> - **חובה עליית גרסה** מעל הקיימת בחנות, אחרת הדחיפה תיכשל.
+> ⚠️ **שלושה דברים שחשוב לדעת על הפרסום:**
+> - **עדכון של בעלים ממתין לאישור מנהל** לפני שהוא עולה לחנות (`pending-approval=true`).
+> - **חובה עליית גרסה** מעל הקיימת בחנות, אחרת הדחיפה מדולגת/נכשלת.
+> - **דחיפה ראשונה (תוסף חדש)** מחייבת לפחות צילום מסך — ספק אותו עם הקלט `screenshots: screenshots/main.png`.
 
 ## רק אימות (PR checks)
 
@@ -84,15 +82,17 @@ jobs:
 
 | קלט | ברירת מחדל | תיאור |
 |---|---|---|
-| `path` | `.` | תיקיית תוסף, תיקיית‑אב עם כמה תוספים, `manifest.json`, או קובץ `.otzplugin`. פרסום דורש תיקיית תוסף בודדת. |
+| `path` | `.` | תיקיית תוסף, תיקיית‑אב עם כמה תוספים, `manifest.json`, או קובץ `.otzplugin`. |
 | `fail-on-warnings` | `false` | `true` — אזהרות מפילות את הריצה (כמו החנות). `false` — רק שגיאות מפילות (כמו ה‑CLI). |
 | `app-version` | `''` | גרסת אוצריא לבדיקת תאימות `minAppVersion`/`maxAppVersion`. ריק = דילוג. |
 | `api-reference-url` | `''` | דריסת כתובת ה‑`API_REFERENCE.md` הנמשך בזמן אמת. |
-| `publish` | `auto` | `auto` = פרסם רק אם שלושת הסודות קיימים; `true` = חייב לפרסם (שגיאה אם חסר סוד); `false` = אימות בלבד. תמיד מדולג ב‑`pull_request`. |
+| `publish` | `auto` | `auto` = פרסם רק אם הסודות קיימים; `true` = חייב לפרסם (שגיאה אם חסר); `false` = אימות בלבד. תמיד מדולג ב‑`pull_request`. |
 | `otzaria-user` | `''` | חשבון החנות (Secret). נדרש לפרסום. |
 | `otzaria-password` | `''` | סיסמת החנות (Secret). נדרש לפרסום. |
-| `otzaria-plugin-id` | `''` | מזהה התוסף בחנות (Secret). נדרש לפרסום. |
-| `sync-metadata` | `true` | מעדכן את שדות התוסף בחנות (שם, יוצר, יציבות, minAppVersion, homepage, רשת) מתוך `manifest.json`. ראו "מנהל מול יוצר" למטה. `false` = משאיר את שדות החנות כמו שהם. |
+| `otzaria-plugin-id` | `''` | **אופציונלי.** בדרך כלל לא נחוץ — התוסף מזוהה לפי ה‑`id` שב‑manifest. הגדר רק כדי לכוון למזהה ספציפי (תוסף יחיד). |
+| `screenshots` | `''` | נתיבי צילומי מסך (מופרדים בפסיק/שורה). נדרש רק ב**דחיפה ראשונה** של תוסף חדש (החנות מחייבת לפחות אחד). |
+| `description` | `''` | תיאור ארוך לחנות, בשימוש רק ביצירת תוסף חדש. ברירת מחדל: תיאור ה‑manifest. |
+| `sync-metadata` | `true` | מעדכן את שדות התוסף בחנות (שם, יוצר, יציבות, minAppVersion, homepage, רשת) מתוך `manifest.json`. ראו "מנהל מול יוצר" למטה. `false` = משאיר כמו שהם. |
 | `force` | `false` | פרסם גם אם הגרסה כבר בחנות (למנהל שמחליף קובץ באותה גרסה). ברירת מחדל מדלגת על פרסום no‑op. |
 | `base-url` | `https://otzaria.org` | כתובת הבסיס של החנות. |
 | `output` | `''` | שם קובץ ה‑`.otzplugin` הנבנה. ברירת מחדל `{id}-{version}.otzplugin`. |
