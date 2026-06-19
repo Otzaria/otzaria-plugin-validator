@@ -1,17 +1,26 @@
 # Otzaria Plugin Validator
 
-> בודק תוספי אוצריא ב‑CI — אותן בדיקות בדיוק שרצות בעת אריזה בפרויקט וב‑העלאה לחנות התוספים.
+> דע שהתוסף תקין **לפני** שאתה מעלה לחנות — אותן בדיקות בדיוק, ישר ב‑CI.
 >
-> Validate Otzaria plugins in CI — the same checks the Otzaria packager and store run.
+> Know your plugin is valid **before** you upload it to the store — the exact same checks, right in CI.
 
 [![Validate](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/Otzaria/otzaria-plugin-validator/actions/workflows/ci.yml)
 
 ---
 
+## למה זה קיים
+
+החנות דוחה תוסף לא תקין **רק אחרי** שטרחת לארוז, להעלות ולחכות — ואז אתה מתחיל מהתחלה.
+ה‑Action הזה מזיז את אותה בדיקה אחורה: הוא רץ על כל push / PR ונותן לך **ירוק = הכל תקין,
+מותר להעלות** או **אדום = מה בדיוק לתקן** — עוד לפני שהגעת בכלל למסך ההעלאה.
+
+לא עוד "להעלות ולקוות". מקמפלים, רואים שאין שגיאות, ורק אז שולחים לחנות.
+
 ## מה זה עושה
 
 GitHub Action שמריץ ולידציה מלאה על תוסף אוצריא — או על מספר תוספים בו‑זמנית — ומסמן
-שגיאות ואזהרות ישירות על הקובץ ב‑Pull Request. הלוגיקה היא פורט מדויק (1:1) של:
+שגיאות ואזהרות ישירות על הקובץ ב‑Pull Request. **התשובה זהה לבית ספרה** לזו שתקבל בחנות,
+כי הלוגיקה היא פורט מדויק (1:1) של:
 
 - `PluginManifestValidator` ו‑`PluginExtendedValidator` שבפרויקט [Otzaria/otzaria](https://github.com/Otzaria/otzaria) (סקריפט האריזה `pack-plugin`).
 - ולידטור החנות (`pluginValidation.js`) שרץ בעת העלאת תוסף.
@@ -20,10 +29,8 @@ GitHub Action שמריץ ולידציה מלאה על תוסף אוצריא — 
 שבריפו הרשמי (ענף `dev`) — בדיוק כמו בבדיקה האוטומטית בחנות. כך תוסף שמשתמש ב‑API חדש
 שתועד זה עתה יעבור, ואילו נפילת רשת חוזרת לרשימת fallback מובנית כדי שה‑CI לעולם לא יישבר.
 
-## למה להשתמש
-
-מי שמפתח תוסף יכול להוסיף את ה‑Action הזה ל‑CI שלו ולקבל **בדיוק את אותה תשובה** שיקבל
-כשינסה לארוז (`pack-plugin`) או להעלות לחנות — לפני שהוא מגיע לשם.
+> רוצה התאמה מלאה להחלטת החנות (שגם אזהרה חוסמת)? הוסף `fail-on-warnings: true` —
+> ואז ירוק ב‑CI מבטיח שגם החנות תקבל את התוסף.
 
 ## שימוש מהיר
 
