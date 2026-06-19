@@ -8,6 +8,8 @@ const path = require('path')
 const { validateSource } = require('../src/validatePlugin')
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
+const { analyzeReachability } = require('../src/reachability')
+const { resolveUpdateFields } = require('../src/publish')
 const { buildFallbackSpec, mergeWithFallback, parseApiReferenceMarkdown } = require('../src/apiSpec')
 
 const spec = mergeWithFallback(buildFallbackSpec())
@@ -179,6 +181,75 @@ test('zipWriter skips dev directories', () => {
   const files = extractZipFiles(fs.readFileSync(out))
   assert.ok(files.has('manifest.json'))
   assert.ok(![...files.keys()].some((n) => n.includes('node_modules') || n.includes('.git')))
+})
+
+test('reachability flags unreferenced files but keeps imported ones', () => {
+  const allNames = ['manifest.json', 'index.html', 'js/app.js', 'css/style.css', 'assets/logo.png', 'orphan.js', 'leftover.txt']
+  const texts = new Map([
+    ['manifest.json', '{}'],
+    ['index.html', '<html><link href="css/style.css"><script src="js/app.js"></script></html>'],
+    ['js/app.js', "import './nothing'"],
+    ['css/style.css', 'body{background:url(../assets/logo.png)}'],
+  ])
+  const manifest = { entrypoint: 'index.html', raw: {} }
+  const { unreferenced } = analyzeReachability({ allNames, texts, manifest })
+  assert.ok(unreferenced.includes('orphan.js'), 'orphan should be flagged')
+  assert.ok(unreferenced.includes('leftover.txt'), 'leftover should be flagged')
+  assert.ok(!unreferenced.includes('js/app.js'), 'imported js must not be flagged')
+  assert.ok(!unreferenced.includes('css/style.css'), 'linked css must not be flagged')
+  assert.ok(!unreferenced.includes('assets/logo.png'), 'css url() asset must not be flagged')
+})
+
+test('packaging skips repo metadata (README, .github, dotfiles)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  fs.writeFileSync(path.join(tmp, 'README.md'), '# docs')
+  fs.writeFileSync(path.join(tmp, 'LICENSE'), 'MIT')
+  fs.writeFileSync(path.join(tmp, '.gitignore'), 'node_modules')
+  fs.mkdirSync(path.join(tmp, '.github'))
+  fs.writeFileSync(path.join(tmp, '.github', 'workflow.yml'), 'name: x')
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+  buildOtzplugin(tmp, out)
+  const names = [...extractZipFiles(fs.readFileSync(out)).keys()]
+  assert.ok(names.includes('manifest.json') && names.includes('index.html'))
+  assert.ok(!names.some((n) => /README|LICENSE|\.gitignore|\.github/.test(n)), `metadata leaked: ${names.join(', ')}`)
+})
+
+test('publish syncs metadata fields from manifest (admin-equivalent update)', () => {
+  const manifest = {
+    name: 'New Name', version: '2.0.0', minAppVersion: '0.9.95',
+    raw: { author: 'New Author', description: 'short new', stability: 'beta', homepage: 'https://x.example', network: { enabled: true } },
+  }
+  const current = {
+    name: 'Old Name', author: 'Old Author', shortDescription: 'short old', status: 'stable',
+    compatibleWith: '0.9.89', homepage: 'https://old.example', requiresNetwork: false,
+    description: 'long curated store description', tags: ['a', 'b'],
+  }
+  const f = resolveUpdateFields({ manifest, current, syncMetadata: true })
+  assert.strictEqual(f.name, 'New Name')
+  assert.strictEqual(f.author, 'New Author')
+  assert.strictEqual(f.shortDescription, 'short new')
+  assert.strictEqual(f.status, 'beta')
+  assert.strictEqual(f.compatibleWith, '0.9.95')
+  assert.strictEqual(f.homepage, 'https://x.example')
+  assert.strictEqual(f.requiresNetwork, 'true')
+  assert.strictEqual(f.version, '2.0.0')
+  // curated fields preserved
+  assert.strictEqual(f.description, 'long curated store description')
+  assert.strictEqual(f.tags, JSON.stringify(['a', 'b']))
+})
+
+test('publish preserves store fields when sync-metadata is off', () => {
+  const manifest = { name: 'New Name', version: '2.0.0', minAppVersion: '0.9.95', raw: { author: 'New Author' } }
+  const current = { name: 'Old Name', author: 'Old Author', status: 'stable', compatibleWith: '0.9.89', description: 'd', shortDescription: 's', tags: [] }
+  const f = resolveUpdateFields({ manifest, current, syncMetadata: false })
+  assert.strictEqual(f.name, 'Old Name')
+  assert.strictEqual(f.author, 'Old Author')
+  assert.strictEqual(f.compatibleWith, '0.9.89')
+  assert.strictEqual(f.version, '2.0.0') // version always bumped
 })
 
 test('API reference markdown parser extracts methods and permissions', () => {

@@ -54,6 +54,21 @@ inputs:
       dashboard, not the manifest id). Use a secret. Required to publish.
     required: false
     default: ''
+  sync-metadata:
+    description: >-
+      When 'true' (default), the plugin''s store fields (name, author, stability,
+      minAppVersion, homepage, network) are updated from manifest.json on publish.
+      Owners always get this server-side; this flag is what makes an ADMIN update
+      sync them too (admins otherwise keep the existing store fields). The long store
+      description and tags are always preserved. Set 'false' to keep store fields as-is.
+    required: false
+    default: 'true'
+  force:
+    description: >-
+      When 'true', publish even if the store already has the manifest version
+      (admins may re-upload the same version). Default 'false' skips a no-op publish.
+    required: false
+    default: 'false'
   base-url:
     description: 'Store base URL. Defaults to https://otzaria.org.'
     required: false

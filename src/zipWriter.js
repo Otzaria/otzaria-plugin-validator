@@ -3,7 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const zlib = require('zlib')
-const { SKIP_DIRS } = require('./knownApi')
+const { SKIP_DIRS, isMetadataDir, isMetadataFile } = require('./knownApi')
 
 // Minimal ZIP writer for building .otzplugin archives (deflate + CRC32).
 // Produces a standard archive that the store's unzipper (fflate) and the
@@ -35,11 +35,12 @@ function collectFiles(root, outputAbs) {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, ent.name)
       if (ent.isDirectory()) {
-        if (SKIP_DIRS.has(ent.name)) continue
+        if (SKIP_DIRS.has(ent.name) || isMetadataDir(ent.name)) continue
         walk(full)
       } else if (ent.isFile()) {
         if (path.resolve(full) === outputAbs) continue
         const name = path.relative(root, full).replace(/\\/g, '/')
+        if (isMetadataFile(name)) continue
         out.push({ name, data: fs.readFileSync(full) })
       }
     }

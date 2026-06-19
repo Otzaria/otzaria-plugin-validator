@@ -44,6 +44,48 @@ async function fetchWithCookies(jar, url, options = {}) {
   return res
 }
 
+// Resolve the multipart text fields for the update PUT. Pure (no I/O) so it can
+// be unit-tested. The long store description and tags are always preserved.
+function resolveUpdateFields({ manifest, current, syncMetadata }) {
+  const raw = manifest.raw || {}
+  const pick = (manifestVal, currentVal) => {
+    const v = (manifestVal == null ? '' : String(manifestVal)).trim()
+    return v !== '' ? v : (currentVal == null ? '' : String(currentVal))
+  }
+
+  let name, author, shortDescription, status, compatibleWith, homepage, requiresNetwork
+  if (syncMetadata) {
+    name = pick(manifest.name, current.name)
+    author = pick(raw.author, current.author)
+    shortDescription = pick(raw.description, current.shortDescription)
+    status = pick(raw.stability, current.status) || 'stable'
+    compatibleWith = pick(manifest.minAppVersion, current.compatibleWith)
+    homepage = pick(raw.homepage, current.homepage)
+    requiresNetwork = (raw.network && raw.network.enabled === true) || current.requiresNetwork === true
+  } else {
+    name = current.name ?? ''
+    author = current.author ?? ''
+    shortDescription = current.shortDescription ?? ''
+    status = current.status ?? 'stable'
+    compatibleWith = current.compatibleWith ?? ''
+    homepage = current.homepage ?? ''
+    requiresNetwork = current.requiresNetwork === true
+  }
+
+  return {
+    name,
+    shortDescription,
+    description: current.description ?? '',
+    version: manifest.version,
+    status,
+    author,
+    compatibleWith,
+    requiresNetwork: requiresNetwork ? 'true' : 'false',
+    tags: JSON.stringify(Array.isArray(current.tags) ? current.tags : []),
+    homepage,
+  }
+}
+
 /**
  * @param {object} args
  * @param {string} args.baseUrl       store base, e.g. https://otzaria.org
@@ -51,11 +93,19 @@ async function fetchWithCookies(jar, url, options = {}) {
  * @param {string} args.password      OTZARIA_PASSWORD
  * @param {string} args.pluginId      OTZARIA_PLUGIN_ID (the store's Mongo _id)
  * @param {string} args.pluginFile    path to the built .otzplugin
- * @param {string} args.version       new version (from manifest)
+ * @param {object} args.manifest      normalized manifest (has .raw, .version, .minAppVersion)
+ * @param {boolean} [args.syncMetadata=true]  push manifest-derived fields (name/author/
+ *   stability/minAppVersion/homepage/network) into the form. Owners derive these from the
+ *   manifest server-side regardless; this is what makes an ADMIN update sync them too
+ *   (admins otherwise keep the existing store fields). The long store description and tags
+ *   are always preserved.
+ * @param {boolean} [args.force=false] publish even if the store already has this version
+ *   (admins may re-upload the same version; owners must bump and the server enforces it).
  * @param {(m:string)=>void} args.log
  * @returns {Promise<{published:boolean, skipped:boolean, pendingApproval:boolean, message:string}>}
  */
-async function publishToStore({ baseUrl, user, password, pluginId, pluginFile, version, log = () => {} }) {
+async function publishToStore({ baseUrl, user, password, pluginId, pluginFile, manifest, syncMetadata = true, force = false, log = () => {} }) {
+  const version = manifest.version
   const base = (baseUrl || 'https://otzaria.org').replace(/\/+$/, '')
   const jar = new CookieJar()
 
@@ -100,28 +150,27 @@ async function publishToStore({ baseUrl, user, password, pluginId, pluginFile, v
   const current = await currentRes.json()
   log(`גרסה נוכחית בחנות: ${current.version} ← חדשה: ${version}`)
 
-  if (current.version === version) {
-    return { published: false, skipped: true, pendingApproval: false, message: `החנות כבר בגרסה ${version} — דילוג` }
+  if (!force && current.version === version) {
+    return { published: false, skipped: true, pendingApproval: false, message: `החנות כבר בגרסה ${version} — דילוג (אפשר לכפות עם force)` }
   }
 
-  // 5) Build multipart and PUT. Carry over current fields; the manifest in the
-  //    uploaded file overrides name/author/version/etc on the server anyway.
+  // 5) Build multipart and PUT.
+  //    Owners: the server derives name/author/stability/minAppVersion/homepage/network
+  //    from the uploaded manifest regardless of these fields.
+  //    Admins: the server uses THESE form fields — so when syncMetadata is on we fill them
+  //    from the manifest, giving admins the same manifest-driven update owners get.
+  //    The long store description and tags are user-curated, so we always preserve them.
+  const fields = resolveUpdateFields({ manifest, current, syncMetadata })
+
   const buf = fs.readFileSync(pluginFile)
   const form = new FormData()
-  form.set('name', current.name ?? '')
-  form.set('shortDescription', current.shortDescription ?? '')
-  form.set('description', current.description ?? '')
-  form.set('version', version)
-  form.set('status', current.status ?? 'stable')
-  form.set('author', current.author ?? '')
-  form.set('compatibleWith', current.compatibleWith ?? '')
-  form.set('requiresNetwork', current.requiresNetwork ? 'true' : 'false')
-  form.set('tags', JSON.stringify(Array.isArray(current.tags) ? current.tags : []))
-  form.set('homepage', current.homepage ?? '')
+  for (const [k, v] of Object.entries(fields)) form.set(k, v)
   form.set('pluginFile', new Blob([buf]), path.basename(pluginFile))
 
   const putRes = await fetchWithCookies(jar, editUrl, { method: 'PUT', body: form })
   const result = await putRes.json().catch(() => ({}))
+  // Surface the store's full response in the run log for every user.
+  log(`תגובת השרת (HTTP ${putRes.status}): ${JSON.stringify(result)}`)
   if (!putRes.ok) {
     const reason = result && result.error ? result.error : `HTTP ${putRes.status}`
     throw new Error(`העדכון נכשל: ${reason}`)
@@ -138,4 +187,4 @@ async function publishToStore({ baseUrl, user, password, pluginId, pluginFile, v
   }
 }
 
-module.exports = { publishToStore, CookieJar }
+module.exports = { publishToStore, resolveUpdateFields, CookieJar }

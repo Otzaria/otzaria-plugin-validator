@@ -95,6 +95,13 @@ async function main() {
     if (report.design && report.design.violations.length > 0) {
       for (const v of report.design.violations) ga.notice(v, { file, title: 'Otzaria design guide' })
     }
+    if (report.unreferenced && report.unreferenced.length > 0) {
+      ga.notice(
+        `${report.unreferenced.length} קבצים ייארזו אך לא נראים מופנים מ-manifest/HTML/CSS/JS — ` +
+        `שקול להסירם (שים לב: הפניות דינמיות אינן מזוהות): ${report.unreferenced.join(', ')}`,
+        { file, title: 'Otzaria unused files' }
+      )
+    }
     if (report.errors.length === 0 && report.warnings.length === 0) {
       ga.info('✓ עבר ללא שגיאות ואזהרות.')
     }
@@ -209,7 +216,9 @@ async function maybePublish(validated) {
       password,
       pluginId,
       pluginFile: built.path,
-      version: manifest.version,
+      manifest,
+      syncMetadata: readBool('sync-metadata', true),
+      force: readBool('force', false),
       log: (m) => ga.info(m),
     })
     ga.setOutput('published', res.published ? 'true' : 'false')

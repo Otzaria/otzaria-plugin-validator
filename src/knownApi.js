@@ -175,6 +175,29 @@ const SKIP_DIRS = new Set([
   'node_modules', '__pycache__', '.claude',
 ])
 
+// Repo-metadata directories that are never part of a plugin (CI config, store
+// screenshots). Skipped when packaging, on top of SKIP_DIRS.
+const METADATA_DIRS = new Set(['.github', 'screenshots'])
+
+// True for directories that are never plugin assets: the explicit metadata set
+// plus any hidden directory (tool artifacts like .gstack, .github, .vscode...).
+function isMetadataDir(name) {
+  if (name === '.' || name === '..') return false
+  return METADATA_DIRS.has(name) || name.startsWith('.')
+}
+
+// True for repo-metadata files that are never plugin assets (docs, licenses,
+// dotfiles, lockfiles). Skipped when packaging so the .otzplugin stays lean.
+function isMetadataFile(relName) {
+  const base = relName.split('/').pop()
+  if (base.startsWith('.')) return true // .gitignore, .editorconfig, .DS_Store, .eslintrc...
+  const lower = base.toLowerCase()
+  if (/\.md$/.test(lower)) return true
+  if (lower.startsWith('license') || lower.startsWith('licence')) return true
+  if (lower === 'package-lock.json' || lower === 'yarn.lock' || lower === 'pnpm-lock.yaml') return true
+  return false
+}
+
 const TOOL_TAB_ICON_NAME_RE = /^[a-z0-9_]+_24_(regular|filled)$/
 
 module.exports = {
@@ -185,5 +208,8 @@ module.exports = {
   METHOD_REQUIRED_PERMISSION,
   RESERVED_HOLDER_FIELDS,
   SKIP_DIRS,
+  METADATA_DIRS,
+  isMetadataDir,
+  isMetadataFile,
   TOOL_TAB_ICON_NAME_RE,
 }

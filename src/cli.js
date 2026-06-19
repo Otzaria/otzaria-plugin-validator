@@ -16,6 +16,8 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--otzaria-password') process.env['INPUT_OTZARIA-PASSWORD'] = args[++i] || ''
   else if (a === '--otzaria-plugin-id') process.env['INPUT_OTZARIA-PLUGIN-ID'] = args[++i] || ''
   else if (a === '--base-url') process.env['INPUT_BASE-URL'] = args[++i] || ''
+  else if (a === '--no-sync-metadata') process.env['INPUT_SYNC-METADATA'] = 'false'
+  else if (a === '--force') process.env.INPUT_FORCE = 'true'
   else if (a === '-h' || a === '--help') {
     process.stdout.write(
       'Usage: node src/cli.js <path> [--fail-on-warnings] [--app-version X] [--api-reference-url U]\n' +
