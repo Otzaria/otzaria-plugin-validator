@@ -86,6 +86,7 @@ jobs:
 | `fail-on-warnings` | `false` | `true` — אזהרות מפילות את הריצה (כמו החנות). `false` — רק שגיאות מפילות (כמו ה‑CLI). |
 | `app-version` | `''` | גרסת אוצריא לבדיקת תאימות `minAppVersion`/`maxAppVersion`. ריק = דילוג. |
 | `api-reference-url` | `''` | דריסת כתובת ה‑`API_REFERENCE.md` הנמשך בזמן אמת. |
+| `build` | `false` | `true` = בנה תמיד את ה‑`.otzplugin` וחשוף את הפלטים `plugin-file`/`sha256`, גם בלי פרסום. לא דורש סודות ורץ גם ב‑`pull_request`, כך שאפשר להעלות אותו כ‑artifact בצעד הבא. |
 | `publish` | `auto` | `auto` = פרסם רק אם הסודות קיימים; `true` = חייב לפרסם (שגיאה אם חסר); `false` = אימות בלבד. תמיד מדולג ב‑`pull_request`. |
 | `otzaria-user` | `''` | חשבון החנות (Secret). נדרש לפרסום. |
 | `otzaria-password` | `''` | סיסמת החנות (Secret). נדרש לפרסום. |

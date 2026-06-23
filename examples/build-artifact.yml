@@ -1,0 +1,29 @@
+# Validate and BUILD the .otzplugin without publishing to the store, then
+# attach it to the workflow run as a downloadable artifact. Works on push and
+# pull_request — no store credentials needed.
+# Copy to .github/workflows/build-artifact.yml in your plugin repo.
+name: Build plugin artifact
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validate and build the .otzplugin. No secrets → no publishing.
+      - id: otzaria
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          build: true
+          publish: false
+
+      # Attach the built file to this run's artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otzplugin
+          path: ${{ steps.otzaria.outputs.plugin-file }}
+          if-no-files-found: error
