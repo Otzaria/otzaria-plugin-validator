@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const zlib = require('zlib')
 const { SKIP_DIRS, isMetadataDir, isMetadataFile } = require('./knownApi')
+const { loadIgnore } = require('./ignore')
 
 // Minimal ZIP writer for building .otzplugin archives (deflate + CRC32).
 // Produces a standard archive that the store's unzipper (fflate) and the
@@ -27,26 +28,33 @@ function crc32(buf) {
   return (crc ^ -1) >>> 0
 }
 
-// Collect packable files from a plugin directory, skipping dev dirs and the
-// output file itself. Returns [{ name, data }] with forward-slash names.
+// Collect packable files from a plugin directory, skipping dev dirs, the output
+// file itself, and anything matched by the plugin's optional .otzignore.
+// Returns { files: [{ name, data }], excluded: number } with forward-slash names.
 function collectFiles(root, outputAbs) {
   const out = []
+  let excluded = 0
+  const ignore = loadIgnore(root)
   const walk = (dir) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, ent.name)
+      const rel = path.relative(root, full).replace(/\\/g, '/')
       if (ent.isDirectory()) {
         if (SKIP_DIRS.has(ent.name) || isMetadataDir(ent.name)) continue
+        // Prune an ignored directory wholesale. Skip the shortcut when the file
+        // uses `!` re-includes, since a child might need to be packed.
+        if (!ignore.hasNegation && ignore.ignores(rel)) continue
         walk(full)
       } else if (ent.isFile()) {
         if (path.resolve(full) === outputAbs) continue
-        const name = path.relative(root, full).replace(/\\/g, '/')
-        if (isMetadataFile(name)) continue
-        out.push({ name, data: fs.readFileSync(full) })
+        if (isMetadataFile(rel)) continue
+        if (ignore.ignores(rel)) { excluded++; continue }
+        out.push({ name: rel, data: fs.readFileSync(full) })
       }
     }
   }
   walk(root)
-  return out
+  return { files: out, excluded }
 }
 
 /**
@@ -55,7 +63,7 @@ function collectFiles(root, outputAbs) {
  */
 function buildOtzplugin(root, outputPath) {
   const outputAbs = path.resolve(outputPath)
-  const files = collectFiles(root, outputAbs)
+  const { files, excluded } = collectFiles(root, outputAbs)
 
   const locals = []
   const centrals = []
@@ -109,7 +117,7 @@ function buildOtzplugin(root, outputPath) {
 
   const crypto = require('crypto')
   const sha256 = crypto.createHash('sha256').update(archive).digest('hex')
-  return { path: outputPath, fileCount: files.length, bytes: archive.length, sha256 }
+  return { path: outputPath, fileCount: files.length, excludedCount: excluded, bytes: archive.length, sha256 }
 }
 
 module.exports = { buildOtzplugin, crc32 }

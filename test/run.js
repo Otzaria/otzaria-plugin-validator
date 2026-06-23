@@ -218,6 +218,32 @@ test('packaging skips repo metadata (README, .github, dotfiles)', () => {
   assert.ok(!names.some((n) => /README|LICENSE|\.gitignore|\.github/.test(n)), `metadata leaked: ${names.join(', ')}`)
 })
 
+test('.otzignore excludes files, dirs, and globs (with ! re-include)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  fs.writeFileSync(path.join(tmp, 'app.js'), 'x')
+  fs.writeFileSync(path.join(tmp, 'app.js.map'), 'x')        // *.map glob
+  fs.writeFileSync(path.join(tmp, 'notes.txt'), 'x')         // anchored single file
+  fs.mkdirSync(path.join(tmp, 'src'))
+  fs.writeFileSync(path.join(tmp, 'src', 'raw.ts'), 'x')     // src/ dir prune
+  fs.writeFileSync(path.join(tmp, 'src', 'keep.js'), 'x')    // re-included by !
+  fs.writeFileSync(path.join(tmp, '.otzignore'),
+    '# build excludes\n*.map\nnotes.txt\nsrc/\n!src/keep.js\n')
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+  const res = buildOtzplugin(tmp, out)
+  const names = [...extractZipFiles(fs.readFileSync(out)).keys()]
+  assert.ok(names.includes('manifest.json') && names.includes('index.html') && names.includes('app.js'))
+  assert.ok(!names.includes('app.js.map'), 'glob *.map should be excluded')
+  assert.ok(!names.includes('notes.txt'), 'notes.txt should be excluded')
+  assert.ok(!names.includes('src/raw.ts'), 'src/ contents should be excluded')
+  assert.ok(names.includes('src/keep.js'), '!src/keep.js should be re-included')
+  assert.ok(!names.includes('.otzignore'), '.otzignore itself should not be packed')
+  assert.strictEqual(res.excludedCount, 3, `expected 3 excluded, got ${res.excludedCount}`)
+})
+
 test('publish syncs metadata fields from manifest (admin-equivalent update)', () => {
   const manifest = {
     name: 'New Name', version: '2.0.0', minAppVersion: '0.9.95',

@@ -175,7 +175,8 @@ function buildPluginFor(source, report, cache) {
   const manifest = report.manifest
   const outputName = readInput('output', '').trim() || `${manifest.id}-${manifest.version}.otzplugin`
   const built = buildOtzplugin(source.root, path.resolve(source.root, '..', outputName))
-  ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים, ${built.bytes} בתים`)
+  const excludedNote = built.excludedCount ? `, ${built.excludedCount} מוחרגים (.otzignore)` : ''
+  ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים${excludedNote}, ${built.bytes} בתים`)
   ga.info(`SHA-256: ${built.sha256}`)
   ga.setOutput('plugin-file', built.path)
   ga.setOutput('sha256', built.sha256)
