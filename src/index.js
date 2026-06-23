@@ -160,7 +160,48 @@ async function main() {
   ga.info('✓ כל התוספים עברו את הבדיקה.')
   process.exitCode = 0
 
-  await maybePublish(validated)
+  // Build the .otzplugin (when requested) and publish it (when enabled). The
+  // build cache is shared so a plugin is packaged at most once even if both run.
+  const buildCache = new Map()
+  await maybeBuild(validated, buildCache)
+  await maybePublish(validated, buildCache)
+}
+
+// Package a single plugin directory into a .otzplugin, set the plugin-file /
+// sha256 outputs, and cache the result by plugin root so build + publish share
+// one build. Returns the built info.
+function buildPluginFor(source, report, cache) {
+  if (cache && cache.has(source.root)) return cache.get(source.root)
+  const manifest = report.manifest
+  const outputName = readInput('output', '').trim() || `${manifest.id}-${manifest.version}.otzplugin`
+  const built = buildOtzplugin(source.root, path.resolve(source.root, '..', outputName))
+  ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים, ${built.bytes} בתים`)
+  ga.info(`SHA-256: ${built.sha256}`)
+  ga.setOutput('plugin-file', built.path)
+  ga.setOutput('sha256', built.sha256)
+  if (cache) cache.set(source.root, built)
+  return built
+}
+
+// Build the .otzplugin without publishing — only when build=true. Unlike
+// publishing, this needs no credentials and runs on pull_request events too, so
+// the artifact is available to upload (actions/upload-artifact, release, etc.).
+async function maybeBuild(validated, cache) {
+  if (!readBool('build', false)) return
+  const dirPlugins = validated.filter((v) => v.source.kind === 'dir' && v.report.manifest)
+  if (dirPlugins.length === 0) {
+    ga.warning('build פעיל אך לא נמצאה תיקיית תוסף עם manifest לבנייה. דלג על הבנייה.')
+    return
+  }
+  ga.startGroup('בניית קובץ .otzplugin')
+  try {
+    for (const { source, report } of dirPlugins) buildPluginFor(source, report, cache)
+  } catch (e) {
+    ga.error(`בניית הקובץ נכשלה: ${e.message}`)
+    process.exitCode = 1
+  } finally {
+    ga.endGroup()
+  }
 }
 
 // Resolve screenshot input paths (comma/newline separated), relative to the
@@ -182,7 +223,7 @@ function resolveScreenshots(raw, pluginRoot) {
 // secrets present) and never on a pull_request event, to keep credentials away
 // from fork PRs. Identifies plugins by their manifest id (resolve), so no
 // store id is needed; falls back to create (upload) on first publish.
-async function maybePublish(validated) {
+async function maybePublish(validated, buildCache) {
   const mode = readInput('publish', 'auto').trim().toLowerCase()
   if (mode === 'false' || mode === 'off' || mode === 'no') return
 
@@ -235,14 +276,9 @@ async function maybePublish(validated) {
   let anyPending = false
   for (const { source, report } of dirPlugins) {
     const manifest = report.manifest
-    const outputName = readInput('output', '').trim() || `${manifest.id}-${manifest.version}.otzplugin`
     ga.startGroup(`פרסום לחנות: ${manifest.name} (${manifest.version})`)
     try {
-      const built = buildOtzplugin(source.root, path.resolve(source.root, '..', outputName))
-      ga.info(`נבנה ${path.basename(built.path)} — ${built.fileCount} קבצים, ${built.bytes} בתים`)
-      ga.info(`SHA-256: ${built.sha256}`)
-      ga.setOutput('plugin-file', built.path)
-      ga.setOutput('sha256', built.sha256)
+      const built = buildPluginFor(source, report, buildCache)
 
       // Determine the store id: explicit input, or resolve by manifest id.
       let id = explicitId || null

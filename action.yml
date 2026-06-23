@@ -32,6 +32,15 @@ inputs:
       Defaults to Otzaria/otzaria@dev. On fetch failure a built-in fallback is used.
     required: false
     default: ''
+  build:
+    description: >-
+      When 'true', always build the .otzplugin and expose the plugin-file /
+      sha256 outputs, even without publishing. Unlike publishing it needs no
+      credentials and runs on pull_request events too, so you can upload the
+      artifact (actions/upload-artifact, a GitHub Release, etc.) in a later step.
+      Default 'false' builds the file only when publishing.
+    required: false
+    default: 'false'
   publish:
     description: >-
       'auto' (default) publishes to the store only when all three otzaria-*
@@ -108,9 +117,9 @@ outputs:
   pending-approval:
     description: "'true' if the pushed update is waiting for admin approval."
   plugin-file:
-    description: 'Path to the built .otzplugin (when publishing).'
+    description: 'Path to the built .otzplugin (when building and/or publishing).'
   sha256:
-    description: 'SHA-256 of the built .otzplugin (when publishing).'
+    description: 'SHA-256 of the built .otzplugin (when building and/or publishing).'
 
 runs:
   using: 'node20'
