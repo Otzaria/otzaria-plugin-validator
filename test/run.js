@@ -200,6 +200,21 @@ test('reachability flags unreferenced files but keeps imported ones', () => {
   assert.ok(!unreferenced.includes('assets/logo.png'), 'css url() asset must not be flagged')
 })
 
+test('reachability ignores .otzignore-excluded files (no false unreferenced warning)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  fs.writeFileSync(path.join(tmp, 'package.json'), '{}')      // dev-only, excluded
+  fs.mkdirSync(path.join(tmp, 'src'))
+  fs.writeFileSync(path.join(tmp, 'src', 'main.ts'), 'x')     // bundled into dist, excluded
+  fs.writeFileSync(path.join(tmp, '.otzignore'), 'src/\npackage.json\n')
+  const report = validateSource({ kind: 'dir', root: tmp }, opts)
+  assert.ok(!report.unreferenced.includes('package.json'), 'excluded package.json must not be flagged')
+  assert.ok(!report.unreferenced.includes('src/main.ts'), 'excluded src/ contents must not be flagged')
+})
+
 test('packaging skips repo metadata (README, .github, dotfiles)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
   fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({

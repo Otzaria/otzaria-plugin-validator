@@ -11,15 +11,18 @@ const {
   validateManifestFields,
 } = require('./manifestValidator')
 const { runExtendedValidation, isCodeLikeFile, isStyleLikeFile } = require('./extendedValidator')
+const { loadIgnore } = require('./ignore')
 
 const SCANNABLE = (name) => name === 'manifest.json' || isCodeLikeFile(name) || isStyleLikeFile(name)
 
 // Read manifest text + scannable file texts from a plugin directory.
-// allNames lists every file that WOULD be packaged (post SKIP/METADATA), for
-// the reachability report.
+// allNames lists every file that WOULD be packaged (post SKIP/METADATA and
+// .otzignore), for the reachability report — so it never flags files the
+// packager will exclude anyway.
 function collectFromDir(root) {
   const fileTexts = new Map()
   const allNames = []
+  const ignore = loadIgnore(root)
   const walk = (dir) => {
     let entries
     try {
@@ -35,6 +38,7 @@ function collectFromDir(root) {
       } else if (ent.isFile()) {
         const rel = path.relative(root, full).replace(/\\/g, '/')
         if (isMetadataFile(rel)) continue
+        if (ignore.ignores(rel)) continue // excluded from the package by .otzignore
         allNames.push(rel)
         if (!SCANNABLE(rel)) continue
         try {
