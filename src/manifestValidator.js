@@ -40,6 +40,7 @@ function buildManifest(json) {
   const network = (json.network && typeof json.network === 'object') ? json.network : {}
   const contributes = (json.contributes && typeof json.contributes === 'object') ? json.contributes : {}
   const toolTab = (contributes.toolTab && typeof contributes.toolTab === 'object') ? contributes.toolTab : {}
+  const background = (contributes.background && typeof contributes.background === 'object') ? contributes.background : {}
 
   const requireString = (value, field) => {
     if (typeof value !== 'string') throw new Error(`השדה "${field}" חסר או אינו מחרוזת`)
@@ -62,6 +63,7 @@ function buildManifest(json) {
     name: requireString(json.name, 'name'),
     version: requireString(json.version, 'version'),
     entrypoint: requireString(json.entrypoint, 'entrypoint'),
+    backgroundEntrypoint: typeof background.entrypoint === 'string' ? background.entrypoint : null,
     minAppVersion: typeof json.minAppVersion === 'string' ? json.minAppVersion : '0.0.0',
     maxAppVersion: typeof json.maxAppVersion === 'string' ? json.maxAppVersion : null,
     permissions,

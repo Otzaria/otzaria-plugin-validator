@@ -3,6 +3,7 @@
 const {
   FALLBACK_PERMISSIONS,
   FALLBACK_API_METHODS,
+  FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,
 } = require('./knownApi')
 
@@ -14,6 +15,7 @@ function buildFallbackSpec() {
   return {
     permissions: new Set(FALLBACK_PERMISSIONS),
     apiMethods: new Set(FALLBACK_API_METHODS),
+    methodMinVersions: new Map(Object.entries(FALLBACK_METHOD_MIN_VERSION)),
     events: new Set(FALLBACK_EVENTS),
     source: 'fallback',
   }
@@ -55,6 +57,14 @@ function parseApiReferenceMarkdown(md) {
     apiMethods.add(match[1])
   }
 
+  // "טבלת גרסאות API": rows like ``| `namespace.method` | 0.9.89 |``.
+  const methodMinVersions = new Map()
+  const versionRowRe =
+    /^\|\s*`([a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+)`\s*\|\s*(\d+\.\d+\.\d+)\s*\|/gm
+  while ((match = versionRowRe.exec(md)) !== null) {
+    methodMinVersions.set(match[1], match[2])
+  }
+
   const onRe = /Otzaria\.on\(['"]([a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+)['"]/g
   while ((match = onRe.exec(md)) !== null) {
     if (match[1] === 'event.name') continue
@@ -76,6 +86,7 @@ function parseApiReferenceMarkdown(md) {
   return {
     permissions,
     apiMethods,
+    methodMinVersions,
     events: events.size > 0 ? events : new Set(FALLBACK_EVENTS),
     source: 'remote',
   }
@@ -108,9 +119,18 @@ async function getApiSpec(url = DEFAULT_API_REFERENCE_URL) {
 // known sets, so a newly-added API is accepted while a lagging doc never
 // rejects something the app already considers valid.
 function mergeWithFallback(spec) {
+  // Versions: start from the hardcoded floor, then let the live doc override —
+  // the doc is the source of truth, but a missing/unparsed row keeps the floor.
+  const methodMinVersions = new Map(Object.entries(FALLBACK_METHOD_MIN_VERSION))
+  if (spec.methodMinVersions) {
+    for (const [method, version] of spec.methodMinVersions) {
+      methodMinVersions.set(method, version)
+    }
+  }
   return {
     permissions: new Set([...FALLBACK_PERMISSIONS, ...spec.permissions]),
     apiMethods: new Set([...FALLBACK_API_METHODS, ...spec.apiMethods]),
+    methodMinVersions,
     events: new Set([...FALLBACK_EVENTS, ...spec.events]),
     source: spec.source,
     error: spec.error,

@@ -130,6 +130,34 @@ test('missing required field reports fromJson error', () => {
   assert.ok(r.errors[0].includes('PluginManifest'), r.errors.join(' | '))
 })
 
+test('declared background entrypoint that exists passes', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.bg', name: 'bg', version: '1.0.0',
+    entrypoint: 'index.html',
+    contributes: { background: { entrypoint: 'background.html' } },
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  fs.writeFileSync(path.join(tmp, 'background.html'), '<html dir="rtl" lang="he"></html>')
+  const r = validateSource({ kind: 'dir', root: tmp }, opts)
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('declared-but-missing background entrypoint is a blocking error', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.bg2', name: 'bg', version: '1.0.0',
+    entrypoint: 'index.html',
+    contributes: { background: { entrypoint: 'background.html' } },
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  const r = validateSource({ kind: 'dir', root: tmp }, opts)
+  assert.ok(
+    r.errors.some((e) => e.includes('קובץ הרקע background.html לא נמצא')),
+    r.errors.join(' | ')
+  )
+})
+
 test('zip reader round-trips stored entries', () => {
   const buf = makeStoredZip({ 'manifest.json': '{"id":"a"}', 'index.js': 'console.log(1)' })
   const files = extractZipFiles(buf)
@@ -141,6 +169,7 @@ test('zip-based plugin validates end to end', () => {
   const buf = makeStoredZip({
     'manifest.json': JSON.stringify({
       schemaVersion: 1, id: 'com.example.z', name: 'z', version: '1.0.0',
+      minAppVersion: '0.9.89',
       entrypoint: 'index.js', permissions: ['app.info.read'],
     }),
     'index.js': "Otzaria.call('app.getInfo')",
@@ -318,6 +347,8 @@ test('API reference markdown parser extracts methods and permissions', () => {
     "Otzaria.on('theme.changed', cb)",
     'events.subscribe:settings.changed',
     '`reader.open` `notes.read` `notes.write` `calendar.read` `ui.feedback`',
+    '| `app.getInfo` | 0.9.89 |',
+    '| `shortcut.create` | 0.9.94 |',
   ].join('\n')
   const parsed = parseApiReferenceMarkdown(md)
   assert.ok(parsed.apiMethods.has('app.getInfo'))
@@ -325,6 +356,40 @@ test('API reference markdown parser extracts methods and permissions', () => {
   assert.ok(parsed.permissions.has('app.info.read'))
   assert.ok(parsed.permissions.has('events.subscribe:settings.changed'))
   assert.ok(parsed.events.has('theme.changed'))
+  assert.strictEqual(parsed.methodMinVersions.get('app.getInfo'), '0.9.89')
+  assert.strictEqual(parsed.methodMinVersions.get('shortcut.create'), '0.9.94')
+})
+
+function versionFixtureZip({ minAppVersion, method, permission }) {
+  const buf = makeStoredZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.ver', name: 'ver', version: '1.0.0',
+      minAppVersion, entrypoint: 'index.js', permissions: [permission],
+    }),
+    'index.js': `Otzaria.call('${method}', {})`,
+  })
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+  fs.writeFileSync(tmp, buf)
+  return tmp
+}
+
+test('blocking error when a plugin uses an API newer than its minAppVersion', () => {
+  const tmp = versionFixtureZip({
+    minAppVersion: '0.9.89', method: 'shortcut.create', permission: 'ui.create_shortcut',
+  })
+  const r = validateSource({ kind: 'zip', file: tmp }, opts)
+  assert.ok(
+    r.errors.some((e) => e.includes('shortcut.create') && e.includes('0.9.94') && e.includes('0.9.89')),
+    'expected version error, got: ' + r.errors.join(' | ')
+  )
+})
+
+test('no version error when minAppVersion is high enough', () => {
+  const tmp = versionFixtureZip({
+    minAppVersion: '0.9.94', method: 'shortcut.create', permission: 'ui.create_shortcut',
+  })
+  const r = validateSource({ kind: 'zip', file: tmp }, opts)
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
 })
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)

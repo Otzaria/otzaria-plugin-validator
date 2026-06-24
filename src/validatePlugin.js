@@ -132,14 +132,33 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
     }
   }
 
+  // Background entrypoint checks (blocking) — same rules as the entrypoint.
+  // A declared-but-missing background file would silently break the plugin on startup.
+  const bg = manifest.backgroundEntrypoint
+  if (bg != null) {
+    if (!entrypointWithinBounds(bg)) {
+      errors.push(`נתיב קובץ הרקע ${bg} חורג מגבולות תיקיית התוסף`)
+    } else if (!entrypointExists(bg)) {
+      errors.push(`קובץ הרקע ${bg} לא נמצא בתיקייה`)
+    } else {
+      const blockedBg = bg.split(/[\\/]/).find((seg) => SKIP_DIRS.has(seg))
+      if (blockedBg) {
+        errors.push(
+          `קובץ הרקע "${bg}" נמצא בתוך תיקייה מוחרגת מאריזה ("${blockedBg}"). ` +
+          `העבר אותו מחוץ לתיקיות: ${[...SKIP_DIRS].join(', ')}`
+        )
+      }
+    }
+  }
+
   // Blocking errors stop here, exactly like the packager (extended runs only on success).
   if (errors.length > 0) {
     return { label, manifestFile, errors, warnings: [], design: null, manifest, unreferenced: [] }
   }
 
-  const { warnings, design } = runExtendedValidation({ manifest, files: fileTexts, spec })
+  const { errors: extErrors, warnings, design } = runExtendedValidation({ manifest, files: fileTexts, spec })
   const { unreferenced } = analyzeReachability({ allNames: allNames || [], texts: fileTexts, manifest })
-  return { label, manifestFile, errors, warnings, design, manifest, unreferenced }
+  return { label, manifestFile, errors: extErrors, warnings, design, manifest, unreferenced }
 }
 
 function validateSource(source, opts) {

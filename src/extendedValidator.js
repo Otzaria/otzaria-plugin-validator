@@ -5,6 +5,7 @@ const {
   METHOD_REQUIRED_PERMISSION,
   RESERVED_HOLDER_FIELDS,
 } = require('./knownApi')
+const { compareCoreVersions } = require('./manifestValidator')
 
 const CODE_FILE_RE = /\.(?:js|mjs|cjs|html?|vue|svelte)$/i
 const STYLE_FILE_RE = /\.(?:css|html?)$/i
@@ -208,10 +209,11 @@ function checkDesignCompliance(files) {
  * @param {object} args
  * @param {object} args.manifest normalized manifest
  * @param {Map<string,string>} args.files map of relative name -> text contents
- * @param {{permissions:Set,apiMethods:Set,events:Set}} args.spec merged API spec
- * @returns {{warnings:string[], design:{compliant:boolean,violations:string[]}}}
+ * @param {{permissions:Set,apiMethods:Set,methodMinVersions:Map,events:Set}} args.spec merged API spec
+ * @returns {{errors:string[], warnings:string[], design:{compliant:boolean,violations:string[]}}}
  */
 function runExtendedValidation({ manifest, files, spec }) {
+  const errors = []
   const warnings = []
   const declared = new Set(manifest.permissions)
   const undocumented = new Set(KNOWN_UNDOCUMENTED_METHODS)
@@ -268,6 +270,24 @@ function runExtendedValidation({ manifest, files, spec }) {
     }
   }
 
+  // Blocking: a method newer than the declared minAppVersion would crash for a
+  // user on that version. Mirrors PluginExtendedValidator._checkMethodVersions.
+  const minVersions = spec.methodMinVersions || new Map()
+  for (const [method, sources] of apiUsage) {
+    const since = minVersions.get(method)
+    if (!since) continue
+    try {
+      if (compareCoreVersions(since, manifest.minAppVersion) > 0) {
+        errors.push(
+          `התוסף משתמש ב-${method} הקיים החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
+          `${manifest.minAppVersion}. עדכן את minAppVersion ל-${since} לפחות (קבצים: ${[...sources].join(', ')})`
+        )
+      }
+    } catch (_e) {
+      // invalid minAppVersion format — reported by validateManifestFields
+    }
+  }
+
   for (const ev of eventUsage.keys()) {
     const eventPerm = `events.subscribe:${ev}`
     if (!spec.permissions.has(eventPerm)) continue
@@ -287,7 +307,7 @@ function runExtendedValidation({ manifest, files, spec }) {
     // design scan is best-effort; never fatal
   }
 
-  return { warnings, design }
+  return { errors, warnings, design }
 }
 
 module.exports = {
