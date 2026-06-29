@@ -6,6 +6,7 @@ const os = require('os')
 const path = require('path')
 
 const { validateSource } = require('../src/validatePlugin')
+const { buildManifest, validateManifestFields } = require('../src/manifestValidator')
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
@@ -94,6 +95,41 @@ test('invalid plugin produces blocking errors', () => {
   assert.ok(joined.includes('הרשאה לא חוקית שנדרשת על ידי התוסף: totally.made.up'), 'missing invalid-perm error')
   assert.ok(joined.includes('toolTab.iconName'), 'missing iconName error')
   assert.ok(joined.includes('קובץ הכניסה does-not-exist.js לא נמצא'), 'missing entrypoint error')
+})
+
+test('blocking error when name exceeds 14 chars or description exceeds 150', () => {
+  const base = { id: 'com.test.limits', name: 'ok', version: '1.0.0', entrypoint: 'index.html' }
+  const validPerms = new Set()
+
+  const longName = validateManifestFields({
+    manifest: buildManifest({ ...base, name: 'name-is-way-too-long' }),
+    validPermissions: validPerms,
+  })
+  assert.ok(longName.some((e) => e.includes('שם התוסף חייב להכיל לכל היותר 14 תווים')), 'missing name-length error')
+
+  const longDesc = validateManifestFields({
+    manifest: buildManifest({ ...base, description: 'א'.repeat(151) }),
+    validPermissions: validPerms,
+  })
+  assert.ok(longDesc.some((e) => e.includes('תיאור קצר חייב להכיל לכל היותר 150 תווים')), 'missing description-length error')
+
+  const titleMismatch = validateManifestFields({
+    manifest: buildManifest({ ...base, name: 'שם', contributes: { toolTab: { title: 'כותרת אחרת' } } }),
+    validPermissions: validPerms,
+  })
+  assert.ok(titleMismatch.some((e) => e.includes('השמות חייבים להיות זהים')), 'missing title!==name error')
+
+  const emptyTitle = validateManifestFields({
+    manifest: buildManifest({ ...base, name: 'שם', contributes: { toolTab: { title: '' } } }),
+    validPermissions: validPerms,
+  })
+  assert.ok(emptyTitle.some((e) => e.includes('השמות חייבים להיות זהים')), 'empty title must be blocked')
+
+  const ok = validateManifestFields({
+    manifest: buildManifest({ ...base, name: 'בסדר גמור', description: 'א'.repeat(150), contributes: { toolTab: { title: 'בסדר גמור' } } }),
+    validPermissions: validPerms,
+  })
+  assert.deepStrictEqual(ok, [], `unexpected errors: ${ok.join(' | ')}`)
 })
 
 test('invalid plugin skips extended validation when blocked', () => {

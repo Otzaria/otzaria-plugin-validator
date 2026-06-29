@@ -61,6 +61,7 @@ function buildManifest(json) {
     schemaVersion: json.schemaVersion === undefined ? 1 : json.schemaVersion,
     id: requireString(json.id, 'id'),
     name: requireString(json.name, 'name'),
+    description: typeof json.description === 'string' ? json.description : '',
     version: requireString(json.version, 'version'),
     entrypoint: requireString(json.entrypoint, 'entrypoint'),
     backgroundEntrypoint: typeof background.entrypoint === 'string' ? background.entrypoint : null,
@@ -89,6 +90,24 @@ function validateManifestFields({ manifest, validPermissions, appVersion = null,
 
   if (!/^[a-z0-9_.-]+$/.test(manifest.id)) {
     errors.push('מזהה התוסף אינו תקין')
+  }
+
+  // שם התוסף מוצג בראש לשונית התוסף ב"כלים" — מעבר ל-14 תווים גולש מהכרטיסייה.
+  if (manifest.name.trim().length > 14) {
+    errors.push('שם התוסף חייב להכיל לכל היותר 14 תווים')
+  }
+
+  // description הוא התיאור הקצר שמוצג בכרטיס התוסף בחנות — מוגבל ל-150 תווים.
+  if (manifest.description.trim().length > 150) {
+    errors.push('תיאור קצר חייב להכיל לכל היותר 150 תווים')
+  }
+
+  // הכותרת המוצגת בטאב חייבת להיות זהה ל-name (גם כותרת ריקה נחסמת — היא
+  // תציג טאב בלי טקסט). title חסר נופל ל-name ב-buildManifest ולכן עובר.
+  if (manifest.toolTabTitle.trim() !== manifest.name.trim()) {
+    errors.push(
+      `שם התוסף ("${manifest.name}") שונה מכותרת הטאב ב-contributes.toolTab.title ("${manifest.toolTabTitle}"). השמות חייבים להיות זהים`
+    )
   }
 
   if (!/^\d+\.\d+\.\d+(?:\+.*)?$/.test(manifest.version)) {

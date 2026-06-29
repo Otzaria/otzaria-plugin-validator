@@ -170,6 +170,9 @@ build/**
 - `manifest.json` חסר, JSON לא תקין, או שדות חובה חסרים (`id`, `name`, `version`, `entrypoint`).
 - `schemaVersion` שונה מ‑`1`.
 - `id` שלא תואם `^[a-z0-9_.-]+$`.
+- `name` ארוך מ‑14 תווים (מוצג בראש לשונית התוסף ב"כלים").
+- `description` (התיאור הקצר בחנות) ארוך מ‑150 תווים.
+- `contributes.toolTab.title` שהוגדר במפורש ואינו זהה ל‑`name` (הכותרת המוצגת בטאב חייבת להיות זהה לשם).
 - `version` שאינו SemVer תקין (`^\d+\.\d+\.\d+(?:\+.*)?$`).
 - הרשאה שאינה ברשימת ההרשאות הרשמית (עם רמז לתיקון).
 - `contributes.databaseSources` ללא הרשאת `database.read`, או רשומות לא תקינות.
