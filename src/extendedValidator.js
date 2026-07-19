@@ -265,9 +265,10 @@ function runExtendedValidation({ manifest, files, spec }) {
   for (const method of apiUsage.keys()) {
     const required = METHOD_REQUIRED_PERMISSION[method]
     if (!required) continue
-    if (!declared.has(required)) {
-      warnings.push(`התוסף משתמש ב-${method} אך לא ביקש את ההרשאה "${required}" ב-manifest`)
-    }
+    if (declared.has(required)) continue
+    // קריאות רשת מסתפקות גם ב-network.localhost (שירות מקומי), לא רק ב-network.access
+    if (required === 'network.access' && declared.has('network.localhost')) continue
+    warnings.push(`התוסף משתמש ב-${method} אך לא ביקש את ההרשאה "${required}" ב-manifest`)
   }
 
   // Blocking: a method newer than the declared minAppVersion would crash for a

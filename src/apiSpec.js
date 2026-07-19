@@ -75,7 +75,7 @@ function parseApiReferenceMarkdown(md) {
       events.add(perm.slice('events.subscribe:'.length))
     }
   }
-  for (const lifecycle of ['plugin.boot', 'plugin.ready']) {
+  for (const lifecycle of ['plugin.boot', 'plugin.ready', 'plugin.suspended', 'plugin.resumed', 'plugin.page_opened']) {
     if (md.includes(lifecycle)) events.add(lifecycle)
   }
 

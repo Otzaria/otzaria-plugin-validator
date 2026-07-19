@@ -428,5 +428,72 @@ test('no version error when minAppVersion is high enough', () => {
   assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
 })
 
+function warningsForZip(files) {
+  const buf = makeStoredZip(files)
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+  fs.writeFileSync(tmp, buf)
+  return validateSource({ kind: 'zip', file: tmp }, opts)
+}
+
+test('lifecycle events (suspended/resumed/page_opened) are known — no unknown-event warning', () => {
+  const r = warningsForZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.lc', name: 'lc', version: '1.0.0',
+      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions: [],
+    }),
+    'index.js': [
+      "Otzaria.on('plugin.suspended', () => {})",
+      "Otzaria.on('plugin.resumed', () => {})",
+      "Otzaria.on('plugin.page_opened', () => {})",
+    ].join('\n'),
+  })
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+  assert.ok(
+    !r.warnings.some((w) => w.includes('רישום ל-event לא מוכר')),
+    'unexpected unknown-event warning: ' + r.warnings.join(' | ')
+  )
+})
+
+test('network.localhost satisfies network.fetch permission cross-check', () => {
+  const files = (permissions) => ({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.net', name: 'net', version: '1.0.0',
+      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions,
+      network: { allowlist: ['127.0.0.1'] },
+    }),
+    'index.js': "Otzaria.call('network.fetch', { url: 'http://127.0.0.1:1234' })",
+  })
+  const withLocalhost = warningsForZip(files(['network.localhost']))
+  assert.ok(
+    !withLocalhost.warnings.some((w) => w.includes('network.access')),
+    'network.localhost must satisfy the check: ' + withLocalhost.warnings.join(' | ')
+  )
+  const withoutAny = warningsForZip(files([]))
+  assert.ok(
+    withoutAny.warnings.some((w) => w.includes('network.fetch') && w.includes('network.access')),
+    'missing-permission warning expected: ' + withoutAny.warnings.join(' | ')
+  )
+})
+
+test('ui.pickFolder without ui.feedback emits a missing-permission warning', () => {
+  const files = (permissions) => ({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.pf', name: 'pf', version: '1.0.0',
+      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions,
+    }),
+    'index.js': "Otzaria.call('ui.pickFolder', {})",
+  })
+  const missing = warningsForZip(files([]))
+  assert.ok(
+    missing.warnings.some((w) => w.includes('ui.pickFolder') && w.includes('ui.feedback')),
+    'missing-permission warning expected: ' + missing.warnings.join(' | ')
+  )
+  const granted = warningsForZip(files(['ui.feedback']))
+  assert.ok(
+    !granted.warnings.some((w) => w.includes('ui.pickFolder')),
+    'unexpected warning: ' + granted.warnings.join(' | ')
+  )
+})
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

@@ -13,6 +13,7 @@
 const FALLBACK_PERMISSIONS = [
   'app.info.read',
   'app.user_email.read',
+  'app.open_url',
   'app.run_on_startup',
   'library.books.read',
   'library.content.read',
@@ -27,10 +28,12 @@ const FALLBACK_PERMISSIONS = [
   'settings.read',
   'ui.feedback',
   'ui.create_shortcut',
+  'fs.user_files.read',
   'plugin.storage.read',
   'plugin.storage.write',
   'published_data.write',
   'network.access',
+  'network.localhost',
   'feedback.send_email',
   'history.read',
   'history.write',
@@ -50,6 +53,7 @@ const FALLBACK_PERMISSIONS = [
 
 const FALLBACK_API_METHODS = [
   'app.getInfo', 'app.getTheme', 'app.getLocale', 'app.getUserEmail', 'app.getGrantedPermissions',
+  'app.openUrl',
   'library.findBooks', 'library.getBookMetadata', 'library.listRecentBooks',
   'library.getBookContent', 'library.getBookToc',
   'search.fullText',
@@ -57,6 +61,7 @@ const FALLBACK_API_METHODS = [
   'reader.getSelection', 'reader.addContextMenuItem', 'reader.removeContextMenuItem',
   'reader.setHighlight', 'reader.getHighlights', 'reader.clearHighlight', 'reader.clearAllHighlights',
   'navigation.goTo',
+  'plugin.openSelf',
   'notes.list', 'notes.getBookNotesSummary', 'notes.add', 'notes.update', 'notes.delete',
   'ui.showMessage', 'ui.showSuccess', 'ui.showError', 'ui.showConfirm', 'ui.showWarning',
   'feedback.sendEmail',
@@ -160,10 +165,16 @@ const FALLBACK_METHOD_MIN_VERSION = {
   'fs.readTextFile': '0.9.94',
   'fs.resolveFileUrl': '0.9.94',
   'fs.revokeFile': '0.9.94',
+  // 0.9.95
+  'app.openUrl': '0.9.95',
+  // 0.9.96
+  'plugin.openSelf': '0.9.96',
 }
 
 const FALLBACK_EVENTS = [
   'plugin.boot', 'plugin.ready',
+  'plugin.suspended', 'plugin.resumed',
+  'plugin.page_opened',
   'theme.changed',
   'navigation.changed',
   'reader.current_book_changed', 'reader.current_ref_changed',
@@ -188,6 +199,7 @@ const METHOD_REQUIRED_PERMISSION = {
   'app.getLocale': 'app.info.read',
   'app.getGrantedPermissions': 'app.info.read',
   'app.getUserEmail': 'app.user_email.read',
+  'app.openUrl': 'app.open_url',
   'library.findBooks': 'library.books.read',
   'library.getBookMetadata': 'library.books.read',
   'library.listRecentBooks': 'library.books.read',
@@ -207,6 +219,7 @@ const METHOD_REQUIRED_PERMISSION = {
   'reader.clearHighlight': 'reader.highlight',
   'reader.clearAllHighlights': 'reader.highlight',
   'navigation.goTo': 'navigation.write',
+  'plugin.openSelf': 'navigation.write',
   'notes.list': 'notes.read',
   'notes.getBookNotesSummary': 'notes.read',
   'notes.add': 'notes.write',
@@ -217,6 +230,7 @@ const METHOD_REQUIRED_PERMISSION = {
   'ui.showError': 'ui.feedback',
   'ui.showConfirm': 'ui.feedback',
   'ui.showWarning': 'ui.feedback',
+  'ui.pickFolder': 'ui.feedback',
   'feedback.sendEmail': 'feedback.send_email',
   'history.list': 'history.read',
   'history.listSearches': 'history.read',
@@ -250,6 +264,10 @@ const METHOD_REQUIRED_PERMISSION = {
   'network.fetch': 'network.access',
   'network.download': 'network.access',
   'shortcut.create': 'ui.create_shortcut',
+  'fs.pickUserFile': 'fs.user_files.read',
+  'fs.resolveFileUrl': 'fs.user_files.read',
+  'fs.readTextFile': 'fs.user_files.read',
+  'fs.revokeFile': 'fs.user_files.read',
 }
 
 // Fields on the Otzaria holder object that are not API methods (shorthand scanner).
