@@ -86,6 +86,21 @@ const COLOR_PROP_RE = /(?:^|[\s;{])(color|background(?:-color)?|border(?:-(?:top
 
 const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '')
 
+// הסלקטור של הכלל שבתוכו נמצא ההיסט — לחריגים תלויי-סלקטור בסריקת ה-CSS.
+// (סריקה טקסטואלית: נסוגים אל ה-'{' הפותח, והסלקטור הוא מה שלפניו עד סוף
+//  הכלל/הבלוק הקודם.)
+function selectorAtOffset(css, index) {
+  const open = css.lastIndexOf('{', index)
+  if (open <= 0) return ''
+  const start = Math.max(css.lastIndexOf('}', open - 1), css.lastIndexOf('{', open - 1))
+  return css.slice(start + 1, open).trim()
+}
+
+// פס כותרת התוסף — הסלקטור המוסכם ב-DESIGN_GUIDE (`.topbar` / `.top-bar`).
+function isTopBarSelector(selector) {
+  return /top-?bar/i.test(selector)
+}
+
 function checkDesignCompliance(files) {
   const violations = []
   const cssChunks = []
@@ -171,8 +186,11 @@ function checkDesignCompliance(files) {
       if (/var\s*\(/.test(value)) continue
       if (/^\d+(?:\.\d+)?\s*(?:em|rem|%)$/i.test(value)) continue
       if (/^0(?:px)?$/.test(value)) continue
+      // חריג פס הכותרת: DESIGN_GUIDE מחייב שם גדלים קשיחים ב-px דווקא, כדי
+      // שהפס לא יתנפח עם גופן הקריאה של המשתמש. נאכף לפי שם הסלקטור.
+      if (isTopBarSelector(selectorAtOffset(stripped, fsMatch.index))) continue
       if (/\d+\s*px/i.test(value)) {
-        addOnce('font-size-px', `${name}: font-size ב-px קבוע ("${value.slice(0, 30)}"). חובה em/rem או var(--font-size-base)`)
+        addOnce('font-size-px', `${name}: font-size ב-px קבוע ("${value.slice(0, 30)}"). חובה em/rem או var(--font-size-base) (px מותר רק בסלקטור פס הכותרת — ראו DESIGN_GUIDE.md)`)
         break
       }
     }

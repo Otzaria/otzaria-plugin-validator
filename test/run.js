@@ -6,6 +6,7 @@ const os = require('os')
 const path = require('path')
 
 const { validateSource } = require('../src/validatePlugin')
+const { checkDesignCompliance } = require('../src/extendedValidator')
 const { buildManifest, validateManifestFields } = require('../src/manifestValidator')
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
@@ -83,6 +84,37 @@ test('valid plugin passes with no errors', () => {
 test('valid plugin is design-compliant', () => {
   const r = validateSource({ kind: 'dir', root: fx('valid-plugin') }, opts)
   assert.strictEqual(r.design.compliant, true, r.design.violations.join(' | '))
+})
+
+// חריג פס הכותרת: DESIGN_GUIDE מחייב שם px קשיחים (שלא יתנפחו עם גופן
+// הקריאה), ולכן font-size ב-px מותר בסלקטור פס הכותרת בלבד.
+test('font-size in px is allowed inside the top bar selector', () => {
+  const files = new Map([['style.css', 'header.topbar .brand { font-size: 16px; }']])
+  const d = checkDesignCompliance(files)
+  assert.ok(
+    !d.violations.some((v) => v.includes('font-size')),
+    `unexpected font-size violation: ${d.violations.join(' | ')}`
+  )
+})
+
+test('font-size in px is still blocked outside the top bar', () => {
+  const files = new Map([['style.css', '.card { font-size: 16px; }']])
+  const d = checkDesignCompliance(files)
+  assert.ok(
+    d.violations.some((v) => v.includes('font-size')),
+    'expected a font-size violation outside the top bar'
+  )
+})
+
+test('top-bar exception does not leak to the next rule', () => {
+  const files = new Map([
+    ['style.css', '.topbar { font-size: 16px; } .card { font-size: 18px; }'],
+  ])
+  const d = checkDesignCompliance(files)
+  assert.ok(
+    d.violations.some((v) => v.includes('font-size')),
+    'expected the non-topbar rule to still be flagged'
+  )
 })
 
 test('invalid plugin produces blocking errors', () => {
