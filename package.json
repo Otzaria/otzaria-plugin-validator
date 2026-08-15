@@ -3,10 +3,17 @@
   "version": "1.0.0",
   "description": "GitHub Action to validate Otzaria plugins against the live SDK reference.",
   "main": "src/index.js",
+  "bin": {
+    "otzaria-plugin-validator": "src/cli.js"
+  },
   "type": "commonjs",
   "engines": {
     "node": ">=20"
   },
+  "files": [
+    "action.yml",
+    "src"
+  ],
   "scripts": {
     "test": "node test/run.js",
     "validate": "node src/cli.js"
