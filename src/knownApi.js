@@ -29,6 +29,7 @@ const FALLBACK_PERMISSIONS = [
   'ui.feedback',
   'ui.create_shortcut',
   'fs.user_files.read',
+  'fs.folder_access',
   'plugin.storage.read',
   'plugin.storage.write',
   'published_data.write',
@@ -51,6 +52,31 @@ const FALLBACK_PERMISSIONS = [
   'events.subscribe:workspace.changed',
   'events.subscribe:plugin.permissions_changed',
 ]
+
+// Baseline permissions (Otzaria >= 0.9.97): granted automatically to every
+// plugin. Declaring them is tolerated (deprecation warning only), and using
+// their APIs without declaring them is NOT a missing-permission warning.
+// Mirrors pluginBaselinePermissions in plugin_valid_permissions.dart.
+const BASELINE_PERMISSIONS = new Set([
+  'plugin.storage.read',
+  'plugin.storage.write',
+  'app.info.read',
+  'ui.feedback',
+  'notifications.send',
+  'events.subscribe:theme.changed',
+])
+
+// New permission (key) covered by a legacy declaration (value):
+// ui.pickFolder historically sat under ui.feedback.
+const LEGACY_PERMISSION_ALIASES = {
+  'fs.folder_access': 'ui.feedback',
+}
+
+// Minimum Otzaria version in which a declared permission exists. An older
+// minAppVersion is a blocking error — old Otzaria rejects unknown permissions.
+const PERMISSION_MIN_VERSION = {
+  'fs.folder_access': '0.9.97',
+}
 
 const FALLBACK_API_METHODS = [
   'app.getInfo', 'app.getTheme', 'app.getLocale', 'app.getUserEmail', 'app.getGrantedPermissions',
@@ -232,7 +258,7 @@ const METHOD_REQUIRED_PERMISSION = {
   'ui.showError': 'ui.feedback',
   'ui.showConfirm': 'ui.feedback',
   'ui.showWarning': 'ui.feedback',
-  'ui.pickFolder': 'ui.feedback',
+  'ui.pickFolder': 'fs.folder_access',
   'feedback.sendEmail': 'feedback.send_email',
   'history.list': 'history.read',
   'history.listSearches': 'history.read',
@@ -311,6 +337,9 @@ const TOOL_TAB_ICON_NAME_RE = /^[a-z0-9_]+_24_(regular|filled)$/
 
 module.exports = {
   FALLBACK_PERMISSIONS,
+  BASELINE_PERMISSIONS,
+  LEGACY_PERMISSION_ALIASES,
+  PERMISSION_MIN_VERSION,
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,

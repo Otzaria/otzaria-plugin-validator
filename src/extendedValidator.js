@@ -4,6 +4,9 @@ const {
   KNOWN_UNDOCUMENTED_METHODS,
   METHOD_REQUIRED_PERMISSION,
   RESERVED_HOLDER_FIELDS,
+  BASELINE_PERMISSIONS,
+  LEGACY_PERMISSION_ALIASES,
+  PERMISSION_MIN_VERSION,
 } = require('./knownApi')
 const { compareCoreVersions } = require('./manifestValidator')
 
@@ -283,10 +286,38 @@ function runExtendedValidation({ manifest, files, spec }) {
   for (const method of apiUsage.keys()) {
     const required = METHOD_REQUIRED_PERMISSION[method]
     if (!required) continue
+    // הרשאות בסיס ניתנות אוטומטית (אוצריא 0.9.97+) — אין צורך בהצהרה
+    if (BASELINE_PERMISSIONS.has(required)) continue
     if (declared.has(required)) continue
+    // הצהרה ותיקה מכסה הרשאה שפוצלה ממנה (ui.feedback → fs.folder_access)
+    if (LEGACY_PERMISSION_ALIASES[required] && declared.has(LEGACY_PERMISSION_ALIASES[required])) continue
     // קריאות רשת מסתפקות גם ב-network.localhost (שירות מקומי), לא רק ב-network.access
     if (required === 'network.access' && declared.has('network.localhost')) continue
     warnings.push(`התוסף משתמש ב-${method} אך לא ביקש את ההרשאה "${required}" ב-manifest`)
+  }
+
+  // הרשאת בסיס שהוצהרה — מיותרת; מומלץ להסיר בהזדמנות.
+  for (const permission of declared) {
+    if (BASELINE_PERMISSIONS.has(permission)) {
+      warnings.push(`ההרשאה "${permission}" ניתנת כיום אוטומטית לכל תוסף — אפשר להסירה מה-manifest`)
+    }
+  }
+
+  // Blocking: a declared permission newer than minAppVersion — old Otzaria
+  // rejects unknown permissions at install time.
+  for (const permission of declared) {
+    const since = PERMISSION_MIN_VERSION[permission]
+    if (!since) continue
+    try {
+      if (compareCoreVersions(since, manifest.minAppVersion) > 0) {
+        errors.push(
+          `ההרשאה "${permission}" קיימת החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
+          `${manifest.minAppVersion}. עדכן את minAppVersion ל-${since} לפחות`
+        )
+      }
+    } catch (_e) {
+      // invalid minAppVersion format — reported by validateManifestFields
+    }
   }
 
   // Blocking: a method newer than the declared minAppVersion would crash for a
@@ -310,6 +341,7 @@ function runExtendedValidation({ manifest, files, spec }) {
   for (const ev of eventUsage.keys()) {
     const eventPerm = `events.subscribe:${ev}`
     if (!spec.permissions.has(eventPerm)) continue
+    if (BASELINE_PERMISSIONS.has(eventPerm)) continue
     if (!declared.has(eventPerm)) {
       warnings.push(`רישום ל-event "${ev}" דורש את ההרשאה "${eventPerm}" שלא הוכרזה ב-manifest`)
     }

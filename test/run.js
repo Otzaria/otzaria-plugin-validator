@@ -507,24 +507,78 @@ test('network.localhost satisfies network.fetch permission cross-check', () => {
   )
 })
 
-test('ui.pickFolder without ui.feedback emits a missing-permission warning', () => {
-  const files = (permissions) => ({
+test('ui.pickFolder without fs.folder_access emits a missing-permission warning', () => {
+  const files = (permissions, minAppVersion = '0.9.96') => ({
     'manifest.json': JSON.stringify({
       schemaVersion: 1, id: 'com.example.pf', name: 'pf', version: '1.0.0',
-      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions,
+      minAppVersion, entrypoint: 'index.js', permissions,
     }),
     'index.js': "Otzaria.call('ui.pickFolder', {})",
   })
   const missing = warningsForZip(files([]))
   assert.ok(
-    missing.warnings.some((w) => w.includes('ui.pickFolder') && w.includes('ui.feedback')),
+    missing.warnings.some((w) => w.includes('ui.pickFolder') && w.includes('fs.folder_access')),
     'missing-permission warning expected: ' + missing.warnings.join(' | ')
   )
-  const granted = warningsForZip(files(['ui.feedback']))
+  // הצהרה ותיקה על ui.feedback עדיין מכסה את pickFolder (alias)
+  const legacy = warningsForZip(files(['ui.feedback']))
   assert.ok(
-    !granted.warnings.some((w) => w.includes('ui.pickFolder')),
-    'unexpected warning: ' + granted.warnings.join(' | ')
+    !legacy.warnings.some((w) => w.includes('ui.pickFolder')),
+    'unexpected warning: ' + legacy.warnings.join(' | ')
   )
+  const explicit = warningsForZip(files(['fs.folder_access'], '0.9.97'))
+  assert.deepStrictEqual(explicit.errors, [], explicit.errors.join(' | '))
+  assert.ok(
+    !explicit.warnings.some((w) => w.includes('ui.pickFolder')),
+    'unexpected warning: ' + explicit.warnings.join(' | ')
+  )
+})
+
+test('baseline APIs need no declaration; declaring one warns (deprecation)', () => {
+  const files = (permissions) => ({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.base', name: 'base', version: '1.0.0',
+      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions,
+    }),
+    'index.js': [
+      "Otzaria.call('storage.get', {})",
+      "Otzaria.call('ui.showMessage', {})",
+      "Otzaria.call('app.getInfo', {})",
+      "Otzaria.call('notifications.showInApp', {})",
+      "Otzaria.on('theme.changed', () => {})",
+    ].join('\n'),
+  })
+  const undeclared = warningsForZip(files([]))
+  assert.ok(
+    !undeclared.warnings.some((w) => w.includes('אך לא ביקש')),
+    'baseline APIs must not warn: ' + undeclared.warnings.join(' | ')
+  )
+  assert.ok(
+    !undeclared.warnings.some((w) => w.includes('theme.changed')),
+    'baseline event must not warn: ' + undeclared.warnings.join(' | ')
+  )
+  const declared = warningsForZip(files(['plugin.storage.read', 'ui.feedback']))
+  assert.ok(
+    declared.warnings.some((w) => w.includes('plugin.storage.read') && w.includes('ניתנת כיום אוטומטית')),
+    'deprecation warning expected: ' + declared.warnings.join(' | ')
+  )
+})
+
+test('declaring fs.folder_access requires minAppVersion 0.9.97', () => {
+  const files = (minAppVersion) => ({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.fa', name: 'fa', version: '1.0.0',
+      minAppVersion, entrypoint: 'index.js', permissions: ['fs.folder_access'],
+    }),
+    'index.js': "Otzaria.call('ui.pickFolder', {})",
+  })
+  const tooOld = warningsForZip(files('0.9.94'))
+  assert.ok(
+    tooOld.errors.some((e) => e.includes('fs.folder_access') && e.includes('0.9.97')),
+    'blocking version error expected: ' + tooOld.errors.join(' | ')
+  )
+  const ok = warningsForZip(files('0.9.97'))
+  assert.deepStrictEqual(ok.errors, [], ok.errors.join(' | '))
 })
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
