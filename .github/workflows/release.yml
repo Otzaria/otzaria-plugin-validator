@@ -1,0 +1,57 @@
+name: Release
+
+# פרסום אוטומטי: כל דחיפה ל-main שמשנה את הגרסה ב-package.json (או הפעלה
+# ידנית) יוצרת תגית vX.Y.Z + Release, ומזיזה את תגית ה-major (v1) אליה.
+# אם התגית של הגרסה הנוכחית כבר קיימת — הריצה מדלגת בשקט.
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Read version from package.json
+        id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: tag
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.v.outputs.version }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run tests
+        if: steps.tag.outputs.exists == 'false'
+        run: npm test
+
+      - name: Create release and move major tag
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v${{ steps.v.outputs.version }}"
+          MAJOR="v$(echo '${{ steps.v.outputs.version }}' | cut -d. -f1)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          git tag -f "$MAJOR"
+          git push -f origin "$MAJOR"
+          gh release create "$VERSION" --title "$VERSION" --generate-notes
