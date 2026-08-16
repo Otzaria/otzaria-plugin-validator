@@ -284,7 +284,10 @@ function runExtendedValidation({ manifest, files, spec }) {
   }
 
   for (const method of apiUsage.keys()) {
-    const required = METHOD_REQUIRED_PERMISSION[method]
+    // המיפוי נגזר מהמסמך הרשמי; המפה המובנית היא רצפה למקרה שהאחזור נכשל.
+    const required =
+      (spec.methodPermissions && spec.methodPermissions.get(method)) ||
+      METHOD_REQUIRED_PERMISSION[method]
     if (!required) continue
     // הרשאות בסיס ניתנות אוטומטית (אוצריא 0.9.97+) — אין צורך בהצהרה
     if (BASELINE_PERMISSIONS.has(required)) continue

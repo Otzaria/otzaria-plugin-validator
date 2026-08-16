@@ -5,6 +5,7 @@ const {
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,
+  METHOD_REQUIRED_PERMISSION,
 } = require('./knownApi')
 
 const DEFAULT_API_REFERENCE_URL =
@@ -16,6 +17,7 @@ function buildFallbackSpec() {
     permissions: new Set(FALLBACK_PERMISSIONS),
     apiMethods: new Set(FALLBACK_API_METHODS),
     methodMinVersions: new Map(Object.entries(FALLBACK_METHOD_MIN_VERSION)),
+    methodPermissions: new Map(Object.entries(METHOD_REQUIRED_PERMISSION)),
     events: new Set(FALLBACK_EVENTS),
     source: 'fallback',
   }
@@ -31,6 +33,68 @@ function looksLikePermission(token) {
   if (/[A-Z]/.test(token)) return false
   if (/^(event|namespace|plugin)\.(name|method|id)$/.test(token)) return false
   return true
+}
+
+const METHOD_HEADING_RE = /^###\s+`([a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+)`(.*)$/
+const DOMAIN_HEADING_RE = /^##\s+`?([a-z][a-zA-Z0-9_]*)\.\*/
+const PERMISSION_LINE_RE = /^\*\*הרשאה(?: נדרשת)?:\*\*\s*(.*)$/
+
+// The permission each API needs, read off the "**הרשאה:**" line under its
+// heading. Keeps the warning in sync with the docs instead of a manual map.
+//
+// Three shapes carry meaning: a plain backticked permission; a "אין" phrasing
+// before any backtick (no permission needed); and a domain-level line under
+// `## namespace.*`, which the APIs below it inherit when they declare none.
+function parseMethodPermissions(md) {
+  const perMethod = new Map()
+  const perDomain = new Map()
+  const methodsSeen = []
+  let method = null
+  let domain = null
+
+  for (const line of md.split(/\r?\n/)) {
+    const domainHeading = line.match(DOMAIN_HEADING_RE)
+    if (domainHeading) {
+      domain = domainHeading[1]
+      method = null
+      continue
+    }
+    if (line.startsWith('## ')) {
+      domain = null
+      method = null
+      continue
+    }
+    const methodHeading = line.match(METHOD_HEADING_RE)
+    if (methodHeading) {
+      // "### `ui.messageClicked` (Event)" is an event, never an Otzaria.call.
+      method = methodHeading[2].includes('(Event)') ? null : methodHeading[1]
+      if (method) methodsSeen.push(method)
+      continue
+    }
+    const permissionLine = line.match(PERMISSION_LINE_RE)
+    if (!permissionLine) continue
+
+    const rest = permissionLine[1]
+    const firstTick = rest.match(/`([a-z][a-zA-Z0-9_.:]+)`/)
+    const noneIndex = rest.search(/אין/)
+    const declaresNone =
+      noneIndex !== -1 && (!firstTick || noneIndex < rest.indexOf('`'))
+    const permission = declaresNone ? null : firstTick && firstTick[1]
+
+    if (method) {
+      if (permission) perMethod.set(method, permission)
+      method = null
+    } else if (domain && permission && !perDomain.has(domain)) {
+      perDomain.set(domain, permission)
+    }
+  }
+
+  for (const seen of methodsSeen) {
+    if (perMethod.has(seen)) continue
+    const inherited = perDomain.get(seen.split('.')[0])
+    if (inherited) perMethod.set(seen, inherited)
+  }
+  return perMethod
 }
 
 // Parse the official API_REFERENCE.md into permissions / apiMethods / events.
@@ -56,6 +120,8 @@ function parseApiReferenceMarkdown(md) {
     if (match[1] === 'namespace.method') continue
     apiMethods.add(match[1])
   }
+
+  const methodPermissions = parseMethodPermissions(md)
 
   // "טבלת גרסאות API": rows like ``| `namespace.method` | 0.9.89 |``.
   const methodMinVersions = new Map()
@@ -87,6 +153,7 @@ function parseApiReferenceMarkdown(md) {
     permissions,
     apiMethods,
     methodMinVersions,
+    methodPermissions,
     events: events.size > 0 ? events : new Set(FALLBACK_EVENTS),
     source: 'remote',
   }
@@ -127,10 +194,18 @@ function mergeWithFallback(spec) {
       methodMinVersions.set(method, version)
     }
   }
+  // Same floor-then-override rule for the permission each method needs.
+  const methodPermissions = new Map(Object.entries(METHOD_REQUIRED_PERMISSION))
+  if (spec.methodPermissions) {
+    for (const [method, permission] of spec.methodPermissions) {
+      methodPermissions.set(method, permission)
+    }
+  }
   return {
     permissions: new Set([...FALLBACK_PERMISSIONS, ...spec.permissions]),
     apiMethods: new Set([...FALLBACK_API_METHODS, ...spec.apiMethods]),
     methodMinVersions,
+    methodPermissions,
     events: new Set([...FALLBACK_EVENTS, ...spec.events]),
     source: spec.source,
     error: spec.error,

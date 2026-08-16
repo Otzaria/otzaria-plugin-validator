@@ -16,6 +16,16 @@ const { buildFallbackSpec, mergeWithFallback, parseApiReferenceMarkdown } = requ
 
 const spec = mergeWithFallback(buildFallbackSpec())
 const opts = { spec, appVersion: null, skipAppVersion: true }
+
+// parseApiReferenceMarkdown דוחה מסמך דל מדי (הגנה מפני אחזור חלקי); זנב זה
+// מספק את המינימום כדי שבדיקות הפרסור יוכלו להתמקד בשורות שהן בודקות.
+const MIN_SPEC_TAIL = [
+  '### `storage.get`', '### `storage.set`', '### `storage.remove`',
+  '### `storage.list`', '### `settings.get`', '### `history.list`',
+  '### `notes.add`', '### `notes.update`', '### `notes.delete`',
+  '### `reader.openBook`', '### `search.fullText`', '### `calendar.getEvents`',
+  '`app.info.read` `notes.read` `notes.write` `reader.open` `ui.feedback` `history.read`',
+].join('\n')
 const fx = (name) => path.join(__dirname, 'fixtures', name)
 
 let passed = 0
@@ -426,6 +436,79 @@ test('API reference markdown parser extracts methods and permissions', () => {
   assert.ok(parsed.events.has('theme.changed'))
   assert.strictEqual(parsed.methodMinVersions.get('app.getInfo'), '0.9.89')
   assert.strictEqual(parsed.methodMinVersions.get('shortcut.create'), '0.9.94')
+})
+
+test('method → permission נגזר מהמסמך: שורה רגילה, "נדרשת", ונספח מגרסה', () => {
+  const md = [
+    '## `library.*`',
+    '### `library.findBooks`',
+    '**הרשאה:** `library.books.read`',
+    '### `library.getBookContent`',
+    '**הרשאה נדרשת:** `library.content.read`',
+    '### `plugin.openOther`',
+    '**הרשאה:** `plugin.open_other` | **מגרסה:** 0.9.97',
+    '### `calendar.getCities`',
+    '**הרשאה:** `calendar.read` · **מגרסה:** 0.9.97',
+    '### `network.fetch`',
+    '**הרשאה:** `network.access` (או `network.localhost` ליעד מקומי)',
+  ].join('\n')
+  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
+  assert.strictEqual(m.get('library.findBooks'), 'library.books.read')
+  assert.strictEqual(m.get('library.getBookContent'), 'library.content.read')
+  assert.strictEqual(m.get('plugin.openOther'), 'plugin.open_other')
+  assert.strictEqual(m.get('calendar.getCities'), 'calendar.read')
+  // חלופת localhost נבדקת בנפרד ב-extendedValidator; כאן נלקחת ההרשאה הראשית.
+  assert.strictEqual(m.get('network.fetch'), 'network.access')
+})
+
+test('"אין הרשאה" אינו מייצר מיפוי, גם כשמוזכרת הרשאה אחרת בהמשך השורה', () => {
+  const md = [
+    '### `plugin.backgroundDone`',
+    '**הרשאה:** אין | **מגרסה:** 0.9.97',
+    '### `fs.deleteFile`',
+    '**הרשאה:** (אין — מגודר ע"י `ui.pickFolder`)',
+    '### `ui.messageClicked` (Event)',
+    '**הרשאה:** `ui.feedback`',
+  ].join('\n')
+  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
+  assert.ok(!m.has('plugin.backgroundDone'))
+  assert.ok(!m.has('fs.deleteFile'))
+  // כותרת (Event) אינה method שנקרא ב-Otzaria.call
+  assert.ok(!m.has('ui.messageClicked'))
+})
+
+test('API בלי שורת הרשאה יורש את הצהרת ה-domain שמעליו', () => {
+  const md = [
+    '## `app.*` - מידע על האפליקציה',
+    '**הרשאה נדרשת:** `app.info.read` (למעט `app.getUserEmail`)',
+    '### `app.getInfo`',
+    'טקסט בלי שורת הרשאה',
+    '### `app.getUserEmail`',
+    '**הרשאה נדרשת:** `app.user_email.read`',
+    '## `notes.*`',
+    '### `notes.list`',
+    '**הרשאה:** `notes.read`',
+  ].join('\n')
+  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
+  assert.strictEqual(m.get('app.getInfo'), 'app.info.read')
+  // הצהרה מפורשת גוברת על ירושת ה-domain
+  assert.strictEqual(m.get('app.getUserEmail'), 'app.user_email.read')
+  // ירושה אינה חוצה גבול domain
+  assert.strictEqual(m.get('notes.list'), 'notes.read')
+})
+
+test('mergeWithFallback: המסמך מרחיב את המפה המובנית ולא מוחק ממנה', () => {
+  const merged = mergeWithFallback({
+    permissions: new Set(['library.books.read']),
+    apiMethods: new Set(['plugin.openOther']),
+    methodMinVersions: new Map(),
+    methodPermissions: new Map([['plugin.openOther', 'plugin.open_other']]),
+    events: new Set(),
+    source: 'remote',
+  })
+  assert.strictEqual(merged.methodPermissions.get('plugin.openOther'), 'plugin.open_other')
+  // רשומה ותיקה שאינה במסמך שנמסר — נשמרת מהרצפה המובנית
+  assert.strictEqual(merged.methodPermissions.get('app.openUrl'), 'app.open_url')
 })
 
 function versionFixtureZip({ minAppVersion, method, permission }) {

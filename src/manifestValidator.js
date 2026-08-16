@@ -80,7 +80,7 @@ function buildManifest(json) {
 // Blocking structural validation. Port of PluginManifestValidator.validateManifest.
 // Collects all errors (instead of throwing on the first) for better CI output;
 // pass/fail outcome is identical to the Otzaria packager.
-function validateManifestFields({ manifest, validPermissions, appVersion = null, skipAppVersionValidation = true }) {
+function validateManifestFields({ manifest, validPermissions, methodPermissions = null, appVersion = null, skipAppVersionValidation = true }) {
   const errors = []
   const permissionSet = manifest.permissions
 
@@ -133,7 +133,9 @@ function validateManifestFields({ manifest, validPermissions, appVersion = null,
 
   for (const perm of permissionSet) {
     if (!validPermissions.has(perm)) {
-      const hint = METHOD_REQUIRED_PERMISSION[perm]
+      const hint =
+        (methodPermissions && methodPermissions.get(perm)) ||
+        METHOD_REQUIRED_PERMISSION[perm]
       if (hint) {
         errors.push(`הרשאה לא חוקית: "${perm}". האם התכוונת ל-"${hint}"?`)
       } else {

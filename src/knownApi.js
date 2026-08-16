@@ -22,6 +22,7 @@ const FALLBACK_PERMISSIONS = [
   'reader.context_menu',
   'reader.highlight',
   'navigation.write',
+  'plugin.open_other',
   'notes.read',
   'notes.write',
   'calendar.read',
@@ -76,6 +77,7 @@ const LEGACY_PERMISSION_ALIASES = {
 // minAppVersion is a blocking error — old Otzaria rejects unknown permissions.
 const PERMISSION_MIN_VERSION = {
   'fs.folder_access': '0.9.97',
+  'plugin.open_other': '0.9.97',
 }
 
 const FALLBACK_API_METHODS = [
@@ -89,6 +91,7 @@ const FALLBACK_API_METHODS = [
   'reader.setHighlight', 'reader.getHighlights', 'reader.clearHighlight', 'reader.clearAllHighlights',
   'navigation.goTo',
   'plugin.openSelf',
+  'plugin.openOther',
   'notes.list', 'notes.getBookNotesSummary', 'notes.add', 'notes.update', 'notes.delete',
   'ui.showMessage', 'ui.showSuccess', 'ui.showError', 'ui.showConfirm', 'ui.showWarning',
   'feedback.sendEmail',
@@ -197,6 +200,8 @@ const FALLBACK_METHOD_MIN_VERSION = {
   'app.openUrl': '0.9.95',
   // 0.9.96
   'plugin.openSelf': '0.9.96',
+  // 0.9.97
+  'plugin.openOther': '0.9.97',
 }
 
 const FALLBACK_EVENTS = [
@@ -248,6 +253,7 @@ const METHOD_REQUIRED_PERMISSION = {
   'reader.clearAllHighlights': 'reader.highlight',
   'navigation.goTo': 'navigation.write',
   'plugin.openSelf': 'navigation.write',
+  'plugin.openOther': 'plugin.open_other',
   'notes.list': 'notes.read',
   'notes.getBookNotesSummary': 'notes.read',
   'notes.add': 'notes.write',

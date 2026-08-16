@@ -110,6 +110,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
   for (const err of validateManifestFields({
     manifest,
     validPermissions: spec.permissions,
+    methodPermissions: spec.methodPermissions,
     appVersion,
     skipAppVersionValidation: skipAppVersion,
   })) {

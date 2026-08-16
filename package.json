@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "test": "node test/run.js",
+    "test:spec-drift": "node test/specDrift.js",
     "validate": "node src/cli.js"
   },
   "keywords": [
