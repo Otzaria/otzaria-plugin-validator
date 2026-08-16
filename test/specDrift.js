@@ -32,23 +32,23 @@ async function main() {
     }
   }
 
-  const problems = []
-  if (parsed.size < MIN_EXPECTED_MAPPINGS) {
-    problems.push(
-      `נגזרו ${parsed.size} מיפויים בלבד (מצופה לפחות ${MIN_EXPECTED_MAPPINGS}) — ` +
-      'ככל הנראה פורמט המסמך השתנה.'
-    )
-  }
+  // הפרש בין המסמך למפה אינו כשל: ענף dev יכול לפגר אחרי האפליקציה (או
+  // להקדים אותה). המיזוג מעדיף את המפה המובנית, ולכן זה מידע לתחזוקה בלבד.
   if (conflicts.length > 0) {
-    problems.push(`סתירות בין המסמך למפה המובנית:\n${conflicts.join('\n')}`)
+    console.log(`הפרשים מול המפה המובנית (המפה גוברת):\n${conflicts.join('\n')}`)
   }
 
-  if (problems.length > 0) {
-    console.error(`✗ ${problems.join('\n')}`)
+  // מה שכן מסוכן: צניחה במספר המיפויים — סימן שפורמט המסמך השתנה והגזירה
+  // הפסיקה לעבוד, וזה נעלם בשקט כי אזהרה חסרה אינה נראית לאיש.
+  if (parsed.size < MIN_EXPECTED_MAPPINGS) {
+    console.error(
+      `✗ נגזרו ${parsed.size} מיפויים בלבד (מצופה לפחות ${MIN_EXPECTED_MAPPINGS}) — ` +
+      'ככל הנראה פורמט המסמך השתנה.'
+    )
     process.exitCode = 1
     return
   }
-  console.log('✓ אין סתירות מול המפה המובנית.')
+  console.log('✓ הגזירה מהמסמך תקינה.')
 }
 
 main()

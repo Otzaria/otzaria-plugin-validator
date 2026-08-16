@@ -194,11 +194,14 @@ function mergeWithFallback(spec) {
       methodMinVersions.set(method, version)
     }
   }
-  // Same floor-then-override rule for the permission each method needs.
+  // Permissions: additive only. dev can lag behind the app (a permission that
+  // was split, say ui.pickFolder → fs.folder_access, is already in the map
+  // before the doc says so), and letting the doc override would walk the
+  // warning back to the older permission.
   const methodPermissions = new Map(Object.entries(METHOD_REQUIRED_PERMISSION))
   if (spec.methodPermissions) {
     for (const [method, permission] of spec.methodPermissions) {
-      methodPermissions.set(method, permission)
+      if (!methodPermissions.has(method)) methodPermissions.set(method, permission)
     }
   }
   return {

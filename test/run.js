@@ -497,18 +497,24 @@ test('API בלי שורת הרשאה יורש את הצהרת ה-domain שמעל
   assert.strictEqual(m.get('notes.list'), 'notes.read')
 })
 
-test('mergeWithFallback: המסמך מרחיב את המפה המובנית ולא מוחק ממנה', () => {
+test('mergeWithFallback: המסמך מוסיף מיפויים אך אינו דורס את המפה המובנית', () => {
   const merged = mergeWithFallback({
     permissions: new Set(['library.books.read']),
     apiMethods: new Set(['plugin.openOther']),
     methodMinVersions: new Map(),
-    methodPermissions: new Map([['plugin.openOther', 'plugin.open_other']]),
+    methodPermissions: new Map([
+      ['plugin.openOther', 'plugin.open_other'],
+      // ענף dev יכול לפגר אחרי האפליקציה: כאן ההרשאה עוד לא פוצלה
+      ['ui.pickFolder', 'ui.feedback'],
+    ]),
     events: new Set(),
     source: 'remote',
   })
   assert.strictEqual(merged.methodPermissions.get('plugin.openOther'), 'plugin.open_other')
   // רשומה ותיקה שאינה במסמך שנמסר — נשמרת מהרצפה המובנית
   assert.strictEqual(merged.methodPermissions.get('app.openUrl'), 'app.open_url')
+  // מסמך מפגר אינו מחזיר את האזהרה להרשאה הישנה
+  assert.strictEqual(merged.methodPermissions.get('ui.pickFolder'), 'fs.folder_access')
 })
 
 function versionFixtureZip({ minAppVersion, method, permission }) {
