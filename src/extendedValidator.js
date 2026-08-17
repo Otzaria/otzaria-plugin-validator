@@ -9,6 +9,7 @@ const {
   PERMISSION_MIN_VERSION,
 } = require('./knownApi')
 const { compareCoreVersions } = require('./manifestValidator')
+const { validateWhenConditions } = require('./whenValidator')
 
 const CODE_FILE_RE = /\.(?:js|mjs|cjs|html?|vue|svelte)$/i
 const STYLE_FILE_RE = /\.(?:css|html?)$/i
@@ -257,6 +258,9 @@ function runExtendedValidation({ manifest, files, spec }) {
       }
     }
   }
+
+  // Blocking: a broken `when` on a startup contribution is rejected at install.
+  for (const err of validateWhenConditions({ manifest, spec })) errors.push(err)
 
   const apiUsage = new Map()
   const eventUsage = new Map()

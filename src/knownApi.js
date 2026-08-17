@@ -15,12 +15,16 @@ const FALLBACK_PERMISSIONS = [
   'app.user_email.read',
   'app.open_url',
   'app.run_on_startup',
+  'app.background_keep_alive',
+  'app.startup_contributions',
   'library.books.read',
   'library.content.read',
   'search.fulltext.read',
   'reader.open',
   'reader.context_menu',
+  'reader.toolbar',
   'reader.highlight',
+  'search.dialog',
   'navigation.write',
   'plugin.open_other',
   'notes.read',
@@ -46,6 +50,7 @@ const FALLBACK_PERMISSIONS = [
   'events.subscribe:reader.current_book_changed',
   'events.subscribe:reader.current_ref_changed',
   'events.subscribe:reader.selection_changed',
+  'events.subscribe:reader.sectionContentChanged',
   'events.subscribe:theme.changed',
   'events.subscribe:settings.changed',
   'events.subscribe:calendar.date_changed',
@@ -79,6 +84,38 @@ const PERMISSION_MIN_VERSION = {
   'fs.folder_access': '0.9.97',
   'plugin.open_other': '0.9.97',
 }
+
+// Otzaria settings a plugin may read (settings.get, and a `when` leaf of kind
+// `setting`). Floor for the list parsed off the live doc; mirrors
+// PluginSettingsAccessPolicy.allowlist.
+const FALLBACK_SETTING_READ_KEYS = [
+  'key-dark-mode', 'key-follow-system-theme',
+  'key-swatch-color', 'key-dark-swatch-color',
+  'key-font-size', 'key-font-family',
+  'key-commentators-font-family', 'key-commentators-font-size',
+  'key-line-height',
+  'key-selected-city', 'key-calendar-type', 'key-settings-language',
+  'key-show-teamim', 'key-default-nikud', 'key-remove-nikud-tanach',
+  'key-replace-holy-names',
+  'key-library-view-mode',
+  'key-copy-with-headers', 'key-copy-header-format',
+  'key-hebrew-books-path',
+]
+
+// Never readable even if a doc drift lists them — PluginSettingsAccessPolicy.blocklist.
+const BLOCKED_SETTING_KEYS = new Set([
+  'key-protected-mode-password-hash',
+  'key-google-calendar-client-secret',
+  'key-google-calendar-credentials-json',
+  'key-db-effective-path',
+  'key-library-path',
+  'key-index-path',
+  'key-backup-path',
+  'key-error-report-sender-email',
+])
+
+// contributes.startup `when` conditions exist from this version on.
+const WHEN_CONDITION_MIN_VERSION = '0.9.97'
 
 const FALLBACK_API_METHODS = [
   'app.getInfo', 'app.getTheme', 'app.getLocale', 'app.getUserEmail', 'app.getGrantedPermissions',
@@ -347,6 +384,9 @@ module.exports = {
   BASELINE_PERMISSIONS,
   LEGACY_PERMISSION_ALIASES,
   PERMISSION_MIN_VERSION,
+  FALLBACK_SETTING_READ_KEYS,
+  BLOCKED_SETTING_KEYS,
+  WHEN_CONDITION_MIN_VERSION,
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,

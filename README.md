@@ -180,6 +180,13 @@ build/**
 - `contributes.databaseSources` ללא הרשאת `database.read`, או רשומות לא תקינות.
 - `toolTab.iconName` שאינו שם אייקון FluentUI 24px תקין.
 - `entrypoint` שחורג מגבולות התיקייה, לא קיים, או יושב בתיקייה מוחרגת מאריזה.
+- הרשאה או API שקיימים רק בגרסה חדשה מ‑`minAppVersion` שהוצהר.
+- תנאי `when` פגום על תרומה ב‑`contributes.startup` (`toolbarItems`,
+  `contextMenuItems`, `searchDialogItems` או איבר `{topic, when}` ב‑`activationEvents`):
+  חריגה מהסכימה (מפתח יחיד לכל צומת, בדיוק אחד מ‑`equals`/`notEquals`/`exists` בעלה),
+  עומק מעל 5, מעל 20 עלים, `key` ריק או ארוך מ‑128 תווים, שדה לא מוכר באיבר
+  `activationEvents` (טעות כתיב כמו `wen`), עלה `setting` על הגדרה שתוספים אינם
+  רשאים לקרוא, או `when` עם `minAppVersion` נמוך מ‑0.9.97. תוסף בלי `when` אינו נבדק.
 - (אופציונלי, עם `app-version`) אי‑תאימות `minAppVersion`/`maxAppVersion`.
 
 **אזהרות** (מוצגות; מפילות רק עם `fail-on-warnings` — זהה ל‑`PluginExtendedValidator`):

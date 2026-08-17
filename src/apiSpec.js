@@ -5,6 +5,7 @@ const {
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,
+  FALLBACK_SETTING_READ_KEYS,
   METHOD_REQUIRED_PERMISSION,
 } = require('./knownApi')
 
@@ -19,6 +20,7 @@ function buildFallbackSpec() {
     methodMinVersions: new Map(Object.entries(FALLBACK_METHOD_MIN_VERSION)),
     methodPermissions: new Map(Object.entries(METHOD_REQUIRED_PERMISSION)),
     events: new Set(FALLBACK_EVENTS),
+    settingKeys: new Set(FALLBACK_SETTING_READ_KEYS),
     source: 'fallback',
   }
 }
@@ -97,6 +99,32 @@ function parseMethodPermissions(md) {
   return perMethod
 }
 
+const SETTING_KEYS_MARKER_RE = /^\*\*מפתחות מורשים לקריאה:\*\*/
+
+// The settings a plugin may read, off the bullet list under settings.getMany.
+// Also gates a `when` leaf of kind `setting`. Returns null when the list looks
+// unparsable, so the caller keeps the hardcoded floor instead of a stub.
+function parseSettingReadKeys(md) {
+  const keys = new Set()
+  let inList = false
+  for (const line of md.split(/\r?\n/)) {
+    if (!inList) {
+      if (SETTING_KEYS_MARKER_RE.test(line.trim())) inList = true
+      continue
+    }
+    if (/^\s*-\s/.test(line)) {
+      const tickRe = /`(key-[a-z0-9-]+)`/g
+      let m
+      while ((m = tickRe.exec(line)) !== null) keys.add(m[1])
+      continue
+    }
+    // Blank lines and indented continuations of a bullet stay inside the list.
+    if (line.trim() === '' || /^\s+\S/.test(line)) continue
+    break
+  }
+  return keys.size >= 5 ? keys : null
+}
+
 // Parse the official API_REFERENCE.md into permissions / apiMethods / events.
 // Mirrors parseApiReferenceMarkdown in the website validator.
 function parseApiReferenceMarkdown(md) {
@@ -122,6 +150,7 @@ function parseApiReferenceMarkdown(md) {
   }
 
   const methodPermissions = parseMethodPermissions(md)
+  const parsedSettingKeys = parseSettingReadKeys(md)
 
   // "טבלת גרסאות API": rows like ``| `namespace.method` | 0.9.89 |``.
   const methodMinVersions = new Map()
@@ -155,6 +184,8 @@ function parseApiReferenceMarkdown(md) {
     methodMinVersions,
     methodPermissions,
     events: events.size > 0 ? events : new Set(FALLBACK_EVENTS),
+    settingKeys: parsedSettingKeys || new Set(FALLBACK_SETTING_READ_KEYS),
+    settingKeysParsed: parsedSettingKeys !== null,
     source: 'remote',
   }
 }
@@ -210,6 +241,8 @@ function mergeWithFallback(spec) {
     methodMinVersions,
     methodPermissions,
     events: new Set([...FALLBACK_EVENTS, ...spec.events]),
+    settingKeys: new Set([...FALLBACK_SETTING_READ_KEYS, ...(spec.settingKeys || [])]),
+    settingKeysParsed: spec.settingKeysParsed === true,
     source: spec.source,
     error: spec.error,
   }
@@ -221,5 +254,6 @@ module.exports = {
   mergeWithFallback,
   buildFallbackSpec,
   parseApiReferenceMarkdown,
+  parseSettingReadKeys,
   looksLikePermission,
 }

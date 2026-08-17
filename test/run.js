@@ -12,7 +12,12 @@ const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
 const { resolveUpdateFields, imageContentType } = require('../src/publish')
-const { buildFallbackSpec, mergeWithFallback, parseApiReferenceMarkdown } = require('../src/apiSpec')
+const {
+  buildFallbackSpec,
+  mergeWithFallback,
+  parseApiReferenceMarkdown,
+  parseSettingReadKeys,
+} = require('../src/apiSpec')
 
 const spec = mergeWithFallback(buildFallbackSpec())
 const opts = { spec, appVersion: null, skipAppVersion: true }
@@ -668,6 +673,170 @@ test('declaring fs.folder_access requires minAppVersion 0.9.97', () => {
   )
   const ok = warningsForZip(files('0.9.97'))
   assert.deepStrictEqual(ok.errors, [], ok.errors.join(' | '))
+})
+
+// ---- contributes.startup `when` ---------------------------------------------
+
+// תוסף מינימלי עם contributes.startup — ללא when כלל אין מה לבדוק, ולכן כל
+// הבדיקות שלהלן נבדלות רק בסעיף startup ובגרסת המינימום.
+function whenPlugin(startup, minAppVersion = '0.9.97') {
+  return warningsForZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.when', name: 'when', version: '1.0.0',
+      minAppVersion, entrypoint: 'index.js', permissions: [],
+      contributes: { startup },
+    }),
+    'index.js': '// no api usage',
+  })
+}
+
+const toolbarWhen = (when) => ({ toolbarItems: [{ id: 'a', label: 'כלי', when }] })
+
+test('when תקין על תרומות ועל activationEvents עובר בלי שגיאות', () => {
+  const r = whenPlugin({
+    toolbarItems: [{
+      id: 'a', label: 'כלי',
+      when: { all: [
+        { setting: { key: 'key-dark-mode', equals: true } },
+        { not: { storage: { key: 'hidden', exists: true } } },
+        { any: [
+          { setting: { key: 'key-font-size', notEquals: 25 } },
+          { storage: { key: 'mode', equals: 'full' } },
+        ] },
+      ] },
+    }],
+    contextMenuItems: [{ id: 'b', label: 'פריט', when: { storage: { key: 'x', equals: null } } }],
+    searchDialogItems: [{ id: 'c', label: 'חיפוש', when: { setting: { key: 'key-settings-language', equals: 'he' } } }],
+    activationEvents: [
+      'app.startup',
+      { topic: 'reader.sectionContentChanged', when: { storage: { key: 'autoSync', equals: true } } },
+    ],
+  })
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('עלה עם שני אופרטורים נפסל', () => {
+  const r = whenPlugin(toolbarWhen({ setting: { key: 'key-dark-mode', equals: true, exists: true } }))
+  assert.ok(
+    r.errors.some((e) => e.includes('toolbarItems') && e.includes('exactly one of equals')),
+    'expected leaf-operator error: ' + r.errors.join(' | ')
+  )
+})
+
+test('צומת עם קומבינטור ועלה יחד נפסל (מפתח יחיד לכל צומת)', () => {
+  const r = whenPlugin(toolbarWhen({
+    setting: { key: 'key-dark-mode', equals: true },
+    any: [{ storage: { key: 'x', exists: true } }],
+  }))
+  assert.ok(
+    r.errors.some((e) => e.includes('exactly one of setting, storage, all, any, not')),
+    'expected single-key error: ' + r.errors.join(' | ')
+  )
+})
+
+test('when עמוק מ-5 רמות נפסל', () => {
+  let when = { setting: { key: 'key-dark-mode', equals: true } }
+  for (let i = 0; i < 5; i++) when = { not: when }
+  const r = whenPlugin(toolbarWhen(when))
+  assert.ok(
+    r.errors.some((e) => e.includes('nested too deeply')),
+    'expected depth error: ' + r.errors.join(' | ')
+  )
+})
+
+test('when עם יותר מ-20 עלים נפסל', () => {
+  const leaves = (n) => Array.from({ length: n }, (_, i) => ({ storage: { key: `k${i}`, exists: true } }))
+  const r = whenPlugin(toolbarWhen({ all: [{ all: leaves(11) }, { all: leaves(11) }] }))
+  assert.ok(
+    r.errors.some((e) => e.includes('too many conditions')),
+    'expected leaf-count error: ' + r.errors.join(' | ')
+  )
+})
+
+test('key ריק או ארוך מ-128 תווים נפסל', () => {
+  const empty = whenPlugin(toolbarWhen({ storage: { key: '', exists: true } }))
+  assert.ok(
+    empty.errors.some((e) => e.includes('non-empty string of up to 128')),
+    'expected empty-key error: ' + empty.errors.join(' | ')
+  )
+  const long = whenPlugin(toolbarWhen({ storage: { key: 'k'.repeat(129), exists: true } }))
+  assert.ok(
+    long.errors.some((e) => e.includes('non-empty string of up to 128')),
+    'expected long-key error: ' + long.errors.join(' | ')
+  )
+})
+
+test('עלה setting על מפתח שאינו זמין לתוספים נפסל', () => {
+  const unknown = whenPlugin(toolbarWhen({ setting: { key: 'key-no-such-setting', equals: 1 } }))
+  assert.ok(
+    unknown.errors.some((e) => e.includes('שאינה זמינה לתוספים') && e.includes('key-no-such-setting')),
+    'expected allowlist error: ' + unknown.errors.join(' | ')
+  )
+  // מפתח חסום לקריאה — מוערך כ-false בזמן ריצה, ולכן נפסל כבר כאן
+  const blocked = whenPlugin(toolbarWhen({ setting: { key: 'key-library-path', exists: true } }))
+  assert.ok(
+    blocked.errors.some((e) => e.includes('key-library-path')),
+    'expected blocklist error: ' + blocked.errors.join(' | ')
+  )
+  // אותו מפתח כ-storage הוא מרחב התוסף עצמו — מותר
+  const asStorage = whenPlugin(toolbarWhen({ storage: { key: 'key-library-path', exists: true } }))
+  assert.deepStrictEqual(asStorage.errors, [], asStorage.errors.join(' | '))
+})
+
+test('activationEvents: שדה לא מוכר ("wen") נפסל במקום להתעלם בשקט', () => {
+  const r = whenPlugin({
+    activationEvents: [{ topic: 'app.startup', wen: { storage: { key: 'x', exists: true } } }],
+  })
+  assert.ok(
+    r.errors.some((e) => e.includes('שדה לא מוכר') && e.includes('wen')),
+    'expected unknown-field error: ' + r.errors.join(' | ')
+  )
+})
+
+test('when דורש minAppVersion 0.9.97', () => {
+  const tooOld = whenPlugin(toolbarWhen({ setting: { key: 'key-dark-mode', equals: true } }), '0.9.96')
+  assert.ok(
+    tooOld.errors.some((e) => e.includes('תנאי when') && e.includes('0.9.97') && e.includes('0.9.96')),
+    'expected version error: ' + tooOld.errors.join(' | ')
+  )
+})
+
+test('contributes.startup בלי when אינו נוגע בתוסף קיים', () => {
+  const r = whenPlugin({
+    toolbarItems: [{ id: 'a', label: 'כלי' }],
+    activationEvents: ['app.startup', 'reader.sectionContentChanged'],
+    keepAlive: true,
+  }, '0.9.96')
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('רשימת ההגדרות המורשות נגזרת מהמסמך, ובפורמט שבור נשמרת הרצפה', () => {
+  const md = [
+    '**מפתחות מורשים לקריאה:**',
+    '- `key-dark-mode`',
+    '- `key-swatch-color`, `key-dark-swatch-color`',
+    '- `key-brand-new-setting`',
+    '- `key-hebrew-books-path` — נתיב ספרי HebrewBooks, או `null`/מחרוזת ריקה',
+    '  כשלא הוגדר מיקום',
+    '',
+    '---',
+    '- `key-not-in-the-list`',
+  ].join('\n')
+  const keys = parseSettingReadKeys(md)
+  assert.ok(keys.has('key-brand-new-setting'), 'מפתח חדש מהמסמך חסר')
+  assert.ok(keys.has('key-dark-swatch-color'), 'מפתח שני באותה שורה חסר')
+  assert.ok(!keys.has('key-not-in-the-list'), 'הפרסור לא נעצר בסוף הרשימה')
+  assert.strictEqual(parseSettingReadKeys('אין כאן רשימה'), null)
+
+  // הרצפה המובנית נשמרת גם כשהמסמך מפגר, והמסמך רק מרחיב אותה
+  const merged = mergeWithFallback({
+    permissions: new Set(), apiMethods: new Set(), methodMinVersions: new Map(),
+    methodPermissions: new Map(), events: new Set(),
+    settingKeys: new Set(['key-brand-new-setting']),
+    source: 'remote',
+  })
+  assert.ok(merged.settingKeys.has('key-brand-new-setting'))
+  assert.ok(merged.settingKeys.has('key-line-height'))
 })
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
