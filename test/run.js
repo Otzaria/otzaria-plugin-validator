@@ -35,14 +35,25 @@ const fx = (name) => path.join(__dirname, 'fixtures', name)
 
 let passed = 0
 let failed = 0
+const pending = [] // טסטים אסינכרוניים — הסיכום ממתין להם לפני היציאה
 function test(name, fn) {
-  try {
-    fn()
+  const pass = () => {
     passed++
     process.stdout.write(`  ✓ ${name}\n`)
-  } catch (e) {
+  }
+  const fail = (e) => {
     failed++
     process.stdout.write(`  ✗ ${name}\n    ${e.message}\n`)
+  }
+  try {
+    const result = fn()
+    if (result && typeof result.then === 'function') {
+      pending.push(result.then(pass, fail))
+    } else {
+      pass()
+    }
+  } catch (e) {
+    fail(e)
   }
 }
 
@@ -412,11 +423,54 @@ test('publish preserves store fields when sync-metadata is off', () => {
   assert.strictEqual(f.version, '2.0.0') // version always bumped
 })
 
-test('publish edit targets the owner route, not the admin route', () => {
+test('publish edit targets the owner route, with the admin route as fallback', () => {
   // /api/admin/* נחסם ב-middleware של האתר לכל מי שאינו מנהל, עוד לפני בדיקת
   // הבעלות — מפתח רגיל חייב לעבור דרך נתיב הבעלים /api/plugins/[id]/edit.
+  // מנהל שאינו הבעלים נדחה בנתיב הבעלים ולכן קיים נתיב אדמין כ-fallback.
   const client = new StoreClient('https://otzaria.org')
   assert.strictEqual(client.editUrl('abc123'), 'https://otzaria.org/api/plugins/abc123/edit')
+  assert.strictEqual(client.adminEditUrl('abc123'), 'https://otzaria.org/api/admin/plugins/abc123/edit')
+})
+
+test('publish edit falls back to the admin route on owner-route 403', async () => {
+  // שני התרחישים בטסט אחד, סדרתית — טסטים אסינכרוניים רצים במקביל ומוק
+  // גלובלי של fetch בשני טסטים נפרדים היה דורס את עצמו.
+  const origFetch = global.fetch
+  try {
+    // מנהל שאינו הבעלים: נתיב הבעלים 403, נתיב האדמין זמין → ממשיכים דרכו.
+    const calls = []
+    global.fetch = async (url) => {
+      calls.push(String(url))
+      const isAdminRoute = String(url).includes('/api/admin/')
+      return {
+        ok: isAdminRoute,
+        status: isAdminRoute ? 200 : 403,
+        headers: { getSetCookie: () => [] },
+        json: async () => ({ version: '1.0.0' }),
+      }
+    }
+    const client = new StoreClient('https://otzaria.org')
+    // הגרסה בחנות זהה לגרסת המניפסט → אחרי ה-fallback המוצלח נקבל דילוג נקי,
+    // בלי להגיע ל-PUT (שדורש קובץ אמיתי).
+    const res = await client.edit({ id: 'abc123', pluginFile: 'x', manifest: { version: '1.0.0' } })
+    assert.strictEqual(res.skipped, true)
+    assert.ok(calls[0].includes('/api/plugins/abc123/edit'), 'owner route tried first')
+    assert.ok(calls[1].includes('/api/admin/plugins/abc123/edit'), 'admin route tried on 403')
+
+    // לא בעלים וגם לא מנהל: שני הנתיבים 403 → שגיאת בעלות.
+    global.fetch = async () => ({
+      ok: false,
+      status: 403,
+      headers: { getSetCookie: () => [] },
+      json: async () => ({}),
+    })
+    await assert.rejects(
+      new StoreClient('https://otzaria.org').edit({ id: 'abc123', pluginFile: 'x', manifest: { version: '1.0.0' } }),
+      /אין בעלות על התוסף/
+    )
+  } finally {
+    global.fetch = origFetch
+  }
 })
 
 test('API reference markdown parser extracts methods and permissions', () => {
@@ -846,5 +900,7 @@ test('רשימת ההגדרות המורשות נגזרת מהמסמך, ובפו
   assert.ok(merged.settingKeys.has('key-line-height'))
 })
 
-process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
-process.exit(failed > 0 ? 1 : 0)
+Promise.all(pending).then(() => {
+  process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
+  process.exit(failed > 0 ? 1 : 0)
+})

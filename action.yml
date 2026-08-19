@@ -80,18 +80,19 @@ inputs:
   sync-metadata:
     description: >-
       When 'true' (default), the plugin''s store fields (name, author, stability,
-      minAppVersion, homepage, network) are sent from manifest.json on publish.
-      Note: the store''s owner endpoint derives these fields from the uploaded
-      manifest server-side regardless, so 'false' mainly affects what is sent,
-      not the end result. The long store description and tags are always preserved.
+      minAppVersion, homepage, network) are updated from manifest.json on publish.
+      Owners always get this server-side; the flag is what makes an ADMIN update
+      (publishing a plugin the account does not own, via the admin fallback route)
+      sync them too. The long store description and tags are always preserved.
     required: false
     default: 'true'
   force:
     description: >-
       When 'true', do not skip when the store already has the manifest version.
-      Note: the store''s owner endpoint still requires the uploaded version to be
-      higher than the current one, so a same-version re-upload will be rejected
-      server-side. Default 'false' skips a no-op publish.
+      Owners: the store still requires the uploaded version to be higher, so a
+      same-version re-upload is rejected server-side. Admins publishing a plugin
+      they do not own may re-upload the same version. Default 'false' skips a
+      no-op publish.
     required: false
     default: 'false'
   base-url:

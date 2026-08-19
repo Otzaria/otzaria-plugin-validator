@@ -143,12 +143,28 @@ class StoreClient {
     return `${this.base}/api/plugins/${encodeURIComponent(id)}/edit`
   }
 
+  // נתיב האדמין — fallback למנהל שמפרסם תוסף שאינו בבעלותו: נתיב הבעלים דוחה
+  // אותו במכוון (403 עם הפניה לממשק הניהול), אך נתיב האדמין פתוח לו.
+  adminEditUrl(id) {
+    return `${this.base}/api/admin/plugins/${encodeURIComponent(id)}/edit`
+  }
+
   // Update an existing plugin (PUT edit). Skips if the store already has the
   // version (unless force). See resolveUpdateFields for the admin-sync logic.
   async edit({ id, pluginFile, manifest, syncMetadata = true, force = false }) {
-    const url = this.editUrl(id)
-    const currentRes = await fetchWithCookies(this.jar, url)
-    if (currentRes.status === 403) throw new Error('אין בעלות על התוסף (403) — החשבון המחובר אינו בעל התוסף בחנות')
+    let url = this.editUrl(id)
+    let currentRes = await fetchWithCookies(this.jar, url)
+    if (currentRes.status === 403) {
+      // ייתכן מנהל שאינו הבעלים — מנסים את נתיב האדמין לפני שמוותרים.
+      const adminRes = await fetchWithCookies(this.jar, this.adminEditUrl(id))
+      if (adminRes.ok) {
+        url = this.adminEditUrl(id)
+        currentRes = adminRes
+        this.log('החשבון אינו בעל התוסף אך הוא מנהל — הפרסום ימשיך דרך נתיב הניהול')
+      } else {
+        throw new Error('אין בעלות על התוסף (403) — החשבון המחובר אינו בעל התוסף בחנות ואינו מנהל')
+      }
+    }
     if (currentRes.status === 404) throw new Error(`התוסף ${id} לא נמצא בחנות (404)`)
     if (!currentRes.ok) throw new Error(`שליפת התוסף הנוכחי נכשלה: HTTP ${currentRes.status}`)
     const current = await currentRes.json()
