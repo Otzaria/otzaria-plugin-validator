@@ -136,8 +136,11 @@ class StoreClient {
     return res.json()
   }
 
+  // נתיב הבעלים (/api/plugins/.../edit) ולא נתיב האדמין: ה-middleware של האתר
+  // חוסם את /api/admin/* לכל מי שאינו מנהל עוד לפני בדיקת הבעלות, כך שמפתח
+  // רגיל — גם כשהוא בעל התוסף — היה מקבל שם 403.
   editUrl(id) {
-    return `${this.base}/api/admin/plugins/${encodeURIComponent(id)}/edit`
+    return `${this.base}/api/plugins/${encodeURIComponent(id)}/edit`
   }
 
   // Update an existing plugin (PUT edit). Skips if the store already has the
@@ -145,7 +148,7 @@ class StoreClient {
   async edit({ id, pluginFile, manifest, syncMetadata = true, force = false }) {
     const url = this.editUrl(id)
     const currentRes = await fetchWithCookies(this.jar, url)
-    if (currentRes.status === 403) throw new Error('אין בעלות על התוסף (403) — החשבון אינו היוצר/מנהל')
+    if (currentRes.status === 403) throw new Error('אין בעלות על התוסף (403) — החשבון המחובר אינו בעל התוסף בחנות')
     if (currentRes.status === 404) throw new Error(`התוסף ${id} לא נמצא בחנות (404)`)
     if (!currentRes.ok) throw new Error(`שליפת התוסף הנוכחי נכשלה: HTTP ${currentRes.status}`)
     const current = await currentRes.json()

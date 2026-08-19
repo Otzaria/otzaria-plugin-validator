@@ -11,7 +11,7 @@ const { buildManifest, validateManifestFields } = require('../src/manifestValida
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
-const { resolveUpdateFields, imageContentType } = require('../src/publish')
+const { resolveUpdateFields, imageContentType, StoreClient } = require('../src/publish')
 const {
   buildFallbackSpec,
   mergeWithFallback,
@@ -410,6 +410,13 @@ test('publish preserves store fields when sync-metadata is off', () => {
   assert.strictEqual(f.author, 'Old Author')
   assert.strictEqual(f.compatibleWith, '0.9.89')
   assert.strictEqual(f.version, '2.0.0') // version always bumped
+})
+
+test('publish edit targets the owner route, not the admin route', () => {
+  // /api/admin/* נחסם ב-middleware של האתר לכל מי שאינו מנהל, עוד לפני בדיקת
+  // הבעלות — מפתח רגיל חייב לעבור דרך נתיב הבעלים /api/plugins/[id]/edit.
+  const client = new StoreClient('https://otzaria.org')
+  assert.strictEqual(client.editUrl('abc123'), 'https://otzaria.org/api/plugins/abc123/edit')
 })
 
 test('API reference markdown parser extracts methods and permissions', () => {
