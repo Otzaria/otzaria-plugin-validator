@@ -47,7 +47,7 @@ inputs:
   github-token:
     description: >-
       Token used to post/replace the pull_request summary comment (only read
-      when pr-comment is 'true'). Typically ${{ github.token }}.
+      when pr-comment is 'true'). Typically the calling workflow's github.token.
     required: false
     default: ''
   build:
