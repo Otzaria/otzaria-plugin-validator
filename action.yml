@@ -32,6 +32,24 @@ inputs:
       Defaults to Otzaria/otzaria@dev. On fetch failure a built-in fallback is used.
     required: false
     default: ''
+  pr-comment:
+    description: >-
+      When 'true', posts the same results table written to the job summary as
+      a single comment on the pull request. A previous comment from this
+      action (identified by a hidden marker) is deleted before the new one is
+      posted, so pushing again replaces it instead of piling up. Only takes
+      effect on pull_request(_target) events; requires 'github-token' with
+      comment-write access (the job needs `permissions: pull-requests: write`).
+      On PRs from forks the default token is read-only, so posting is skipped
+      with a warning rather than failing the run. Default 'false'.
+    required: false
+    default: 'false'
+  github-token:
+    description: >-
+      Token used to post/replace the pull_request summary comment (only read
+      when pr-comment is 'true'). Typically ${{ github.token }}.
+    required: false
+    default: ''
   build:
     description: >-
       When 'true', always build the .otzplugin and expose the plugin-file /

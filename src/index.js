@@ -8,6 +8,7 @@ const { validateSource } = require('./validatePlugin')
 const fs = require('fs')
 const { buildOtzplugin } = require('./zipWriter')
 const { StoreClient } = require('./publish')
+const { replaceSummaryComment } = require('./prComment')
 
 function readInput(name, fallback = '') {
   const key = `INPUT_${name.toUpperCase().replace(/ /g, '_')}`
@@ -132,6 +133,7 @@ async function main() {
     md += `| ${r.name} | ${r.errors} | ${r.warnings} | ${r.design} | ${r.status} |\n`
   }
   ga.summary(md)
+  await maybePostPrComment(md)
 
   ga.setOutput('total-plugins', String(sources.length))
   ga.setOutput('total-errors', String(totalErrors))
@@ -165,6 +167,51 @@ async function main() {
   const buildCache = new Map()
   await maybeBuild(validated, buildCache)
   await maybePublish(validated, buildCache)
+}
+
+// Post/replace the single PR summary comment — only when pr-comment is
+// enabled, and only on a pull_request(_target) event (there is no PR to
+// comment on otherwise). Fork PRs get a read-only GITHUB_TOKEN regardless of
+// the workflow's `permissions:` block, so a 403 here is expected and reduced
+// to a warning rather than failing the whole validation run.
+async function maybePostPrComment(markdown) {
+  if (!readBool('pr-comment', false)) return
+  const eventName = process.env.GITHUB_EVENT_NAME || ''
+  if (!eventName.startsWith('pull_request')) {
+    ga.info('pr-comment פעיל אך זו אינה הרצת pull_request — דילוג.')
+    return
+  }
+  const token = readInput('github-token', '').trim()
+  if (!token) {
+    ga.warning('pr-comment פעיל אך github-token לא הוגדר — לא ניתן לפרסם תגובה.')
+    return
+  }
+
+  let prNumber
+  try {
+    const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
+    prNumber = event.pull_request && event.pull_request.number
+  } catch (e) {
+    ga.warning(`pr-comment: לא ניתן לקרוא את אירוע ה-PR (${e.message}).`)
+    return
+  }
+  if (!prNumber) {
+    ga.warning('pr-comment: לא נמצא מספר PR באירוע.')
+    return
+  }
+
+  const repo = process.env.GITHUB_REPOSITORY || ''
+  const apiBase = `${process.env.GITHUB_API_URL || 'https://api.github.com'}/repos/${repo}`
+  const runUrl = repo && process.env.GITHUB_RUN_ID
+    ? `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`
+    : ''
+
+  try {
+    await replaceSummaryComment({ token, apiBase, prNumber, markdown, runUrl })
+    ga.info('✓ תגובת הסיכום פורסמה על ה-PR.')
+  } catch (e) {
+    ga.warning(`פרסום תגובת הסיכום ל-PR נכשל (בדוק permissions: pull-requests: write): ${e.message}`)
+  }
 }
 
 // Package a single plugin directory into a .otzplugin, set the plugin-file /

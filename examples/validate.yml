@@ -6,6 +6,10 @@ on:
   push:
   pull_request:
 
+# Needed only if pr-comment (below) is enabled.
+permissions:
+  pull-requests: write
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -19,3 +23,8 @@ jobs:
           path: .
           # Set to true to also fail on warnings (matches the store upload).
           fail-on-warnings: false
+          # Post (and replace on every push) a single PR comment with the
+          # results table, in addition to the job summary. Only takes effect
+          # on pull_request events; a no-op on plain push runs.
+          pr-comment: true
+          github-token: ${{ github.token }}

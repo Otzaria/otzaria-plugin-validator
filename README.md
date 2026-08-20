@@ -80,6 +80,31 @@ jobs:
 קלטים שימושיים נוספים: `fail-on-warnings: true` (אזהרות מפילות, כמו החנות),
 `app-version: '0.9.95'` (בדיקת `minAppVersion`/`maxAppVersion`), `path` (תיקיית תוסף / מונורפו / `.otzplugin`).
 
+### תגובת סיכום על ה-PR (`pr-comment`)
+
+כדי שהתוצאות (כולל טבלת השגיאות/אזהרות/עיצוב) יופיעו כתגובה על ה-PR ולא רק ב-Job Summary,
+הוסף `pr-comment: true` וטוקן עם הרשאת כתיבה על תגובות:
+
+```yaml
+on: [pull_request]
+permissions:
+  pull-requests: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          pr-comment: 'true'
+          github-token: ${{ github.token }}
+```
+
+כל push חדש ל-PR מוחק את תגובת הסיכום הקודמת (מזוהה ע"י סמן חבוי) ומפרסם חדשה במקומה —
+כך שיש תמיד תגובה אחת, לא שרשרת שמצטברת. ב-PR שמגיע מ-fork, ל-`GITHUB_TOKEN`
+יש הרשאת קריאה בלבד תמיד (מגבלת GitHub, בלי קשר ל-`permissions:` שהוגדר) —
+הפרסום ידולג עם אזהרה, בלי להפיל את הריצה.
+
 ## קלטים (inputs)
 
 | קלט | ברירת מחדל | תיאור |
@@ -88,6 +113,8 @@ jobs:
 | `fail-on-warnings` | `false` | `true` — אזהרות מפילות את הריצה (כמו החנות). `false` — רק שגיאות מפילות (כמו ה‑CLI). |
 | `app-version` | `''` | גרסת אוצריא לבדיקת תאימות `minAppVersion`/`maxAppVersion`. ריק = דילוג. |
 | `api-reference-url` | `''` | דריסת כתובת ה‑`API_REFERENCE.md` הנמשך בזמן אמת. |
+| `pr-comment` | `false` | `true` — מפרסם/מחליף תגובת סיכום יחידה על ה‑PR (ראו [למעלה](#תגובת-סיכום-על-ה-pr-pr-comment)). פועל רק ב‑`pull_request(_target)`. |
+| `github-token` | `''` | טוקן לפרסום תגובת ה‑PR (נדרש כשל‑`pr-comment` הוא `true`). בד"כ `${{ github.token }}`. |
 | `build` | `false` | `true` = בנה תמיד את ה‑`.otzplugin` וחשוף את הפלטים `plugin-file`/`sha256`, גם בלי פרסום. לא דורש סודות ורץ גם ב‑`pull_request`, כך שאפשר להעלות אותו כ‑artifact בצעד הבא. |
 | `publish` | `auto` | `auto` = פרסם רק אם הסודות קיימים; `true` = חייב לפרסם (שגיאה אם חסר); `false` = אימות בלבד. תמיד מדולג ב‑`pull_request`. |
 | `otzaria-user` | `''` | חשבון החנות (Secret). נדרש לפרסום. |

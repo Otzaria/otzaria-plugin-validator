@@ -12,6 +12,7 @@ const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
 const { resolveUpdateFields, imageContentType, StoreClient } = require('../src/publish')
+const { MARKER, buildCommentBody, replaceSummaryComment } = require('../src/prComment')
 const {
   buildFallbackSpec,
   mergeWithFallback,
@@ -432,9 +433,10 @@ test('publish edit targets the owner route, with the admin route as fallback', (
   assert.strictEqual(client.adminEditUrl('abc123'), 'https://otzaria.org/api/admin/plugins/abc123/edit')
 })
 
-test('publish edit falls back to the admin route on owner-route 403', async () => {
-  // שני התרחישים בטסט אחד, סדרתית — טסטים אסינכרוניים רצים במקביל ומוק
-  // גלובלי של fetch בשני טסטים נפרדים היה דורס את עצמו.
+test('network-mocked scenarios (publish fallback + pr comment)', async () => {
+  // כל התרחישים שדורשים מוק גלובלי של fetch מרוכזים בטסט אחד, סדרתית —
+  // טסטים אסינכרוניים רצים במקביל, ומוק גלובלי בכמה טסטים נפרדים היה דורס
+  // את עצמו.
   const origFetch = global.fetch
   try {
     // מנהל שאינו הבעלים: נתיב הבעלים 403, נתיב האדמין זמין → ממשיכים דרכו.
@@ -468,9 +470,62 @@ test('publish edit falls back to the admin route on owner-route 403', async () =
       new StoreClient('https://otzaria.org').edit({ id: 'abc123', pluginFile: 'x', manifest: { version: '1.0.0' } }),
       /אין בעלות על התוסף/
     )
+
+    // pr comment: תגובה קודמת עם ה-MARKER נמחקת (השנייה, ללא MARKER, נשארת),
+    // ואז נוצרת תגובה חדשה.
+    const prCalls = []
+    global.fetch = async (url, opts) => {
+      const method = (opts && opts.method) || 'GET'
+      prCalls.push({ url: String(url), method })
+      if (String(url).endsWith('/comments?per_page=100')) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: 1, body: `${MARKER}\nold summary` },
+            { id: 2, body: 'unrelated human comment' },
+          ],
+        }
+      }
+      if (method === 'DELETE') return { ok: true, status: 204 }
+      if (method === 'POST') return { ok: true, json: async () => ({ id: 3 }) }
+      throw new Error(`unexpected request: ${url}`)
+    }
+    await replaceSummaryComment({
+      token: 't', apiBase: 'https://api.github.com/repos/o/r', prNumber: 5, markdown: '| x |', runUrl: '',
+    })
+    const deleted = prCalls.filter((c) => c.method === 'DELETE').map((c) => c.url)
+    assert.deepStrictEqual(deleted, ['https://api.github.com/repos/o/r/issues/comments/1'])
+    assert.strictEqual(prCalls.filter((c) => c.method === 'POST').length, 1)
+
+    // pr comment: בלי תגובה קודמת עם MARKER — GET ואז POST בלבד, בלי DELETE.
+    const prMethods = []
+    global.fetch = async (url, opts) => {
+      prMethods.push((opts && opts.method) || 'GET')
+      if (String(url).endsWith('/comments?per_page=100')) return { ok: true, json: async () => [] }
+      return { ok: true, json: async () => ({ id: 9 }) }
+    }
+    await replaceSummaryComment({
+      token: 't', apiBase: 'https://api.github.com/repos/o/r', prNumber: 5, markdown: '| x |', runUrl: '',
+    })
+    assert.deepStrictEqual(prMethods, ['GET', 'POST'])
+
+    // pr comment: כשל HTTP מייצר שגיאה קריאה (כולל גוף התשובה).
+    global.fetch = async () => ({ ok: false, status: 403, text: async () => 'Resource not accessible' })
+    await assert.rejects(
+      replaceSummaryComment({
+        token: 't', apiBase: 'https://api.github.com/repos/o/r', prNumber: 5, markdown: '| x |', runUrl: '',
+      }),
+      /HTTP 403.*Resource not accessible/
+    )
   } finally {
     global.fetch = origFetch
   }
+})
+
+test('pr comment body embeds the marker and an optional run link', () => {
+  assert.ok(buildCommentBody('| a | b |', '').startsWith(MARKER))
+  assert.ok(!buildCommentBody('| a | b |', '').includes('הרצה מלאה'))
+  assert.ok(buildCommentBody('| a | b |', 'https://x/runs/1').includes('[הרצה מלאה](https://x/runs/1)'))
 })
 
 test('API reference markdown parser extracts methods and permissions', () => {
