@@ -16,22 +16,13 @@ const { MARKER, buildCommentBody, replaceSummaryComment } = require('../src/prCo
 const {
   buildFallbackSpec,
   mergeWithFallback,
-  parseApiReferenceMarkdown,
-  parseSettingReadKeys,
+  parseSpecJson,
 } = require('../src/apiSpec')
+const vendoredSpec = require('../src/spec.json')
+const { isBlockedSettingKey } = require('../src/knownApi')
 
 const spec = mergeWithFallback(buildFallbackSpec())
 const opts = { spec, appVersion: null, skipAppVersion: true }
-
-// parseApiReferenceMarkdown דוחה מסמך דל מדי (הגנה מפני אחזור חלקי); זנב זה
-// מספק את המינימום כדי שבדיקות הפרסור יוכלו להתמקד בשורות שהן בודקות.
-const MIN_SPEC_TAIL = [
-  '### `storage.get`', '### `storage.set`', '### `storage.remove`',
-  '### `storage.list`', '### `settings.get`', '### `history.list`',
-  '### `notes.add`', '### `notes.update`', '### `notes.delete`',
-  '### `reader.openBook`', '### `search.fullText`', '### `calendar.getEvents`',
-  '`app.info.read` `notes.read` `notes.write` `reader.open` `ui.feedback` `history.read`',
-].join('\n')
 const fx = (name) => path.join(__dirname, 'fixtures', name)
 
 let passed = 0
@@ -189,6 +180,31 @@ test('blocking error when name exceeds 14 chars or description exceeds 150', () 
     validPermissions: validPerms,
   })
   assert.deepStrictEqual(ok, [], `unexpected errors: ${ok.join(' | ')}`)
+})
+
+test('stability חייב להיות stable/beta/experimental (חסר → ברירת מחדל stable)', () => {
+  const base = { id: 'com.test.stability', name: 'ok', version: '1.0.0', entrypoint: 'index.html' }
+  const validPerms = new Set()
+
+  const bad = validateManifestFields({
+    manifest: buildManifest({ ...base, stability: 'alpha' }),
+    validPermissions: validPerms,
+  })
+  assert.ok(bad.some((e) => e.includes('stability')), 'missing stability error')
+
+  const missing = validateManifestFields({
+    manifest: buildManifest({ ...base }),
+    validPermissions: validPerms,
+  })
+  assert.ok(!missing.some((e) => e.includes('stability')), 'missing stability must default to stable')
+
+  for (const value of ['stable', 'beta', 'experimental']) {
+    const r = validateManifestFields({
+      manifest: buildManifest({ ...base, stability: value }),
+      validPermissions: validPerms,
+    })
+    assert.ok(!r.some((e) => e.includes('stability')), `stability=${value} should pass`)
+  }
 })
 
 test('invalid plugin skips extended validation when blocked', () => {
@@ -383,6 +399,100 @@ test('.otzignore excludes files, dirs, and globs (with ! re-include)', () => {
   assert.strictEqual(res.excludedCount, 3, `expected 3 excluded, got ${res.excludedCount}`)
 })
 
+test('reachability warns on a local asset the packaging rules dropped', () => {
+  const allNames = ['manifest.json', 'index.html', 'app.js']
+  const texts = new Map([
+    ['manifest.json', '{}'],
+    ['index.html', '<html><script src="app.js"></script></html>'],
+    ['app.js', "fetch('help.md').then(r => r.text()); fetch('https://x.example/api')"],
+  ])
+  const manifest = { entrypoint: 'index.html', raw: {} }
+  const { missing } = analyzeReachability({ allNames, texts, manifest })
+  assert.ok(missing.some((m) => m.includes('help.md')), `expected help.md, got ${missing.join(', ')}`)
+  assert.ok(!missing.some((m) => m.includes('x.example')), 'external URLs must not be flagged')
+})
+
+test('a bare loopback host is accepted in network.allowlist (as Otzaria accepts it)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
+    minAppVersion: '0.9.95', permissions: ['network.access'],
+    network: { enabled: true, allowlist: ['127.0.0.1', 'localhost', 'https://api.example.com'] },
+    contributes: { toolTab: { title: 'y' } },
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  const report = validateSource({ kind: 'dir', root: tmp }, opts)
+  const complaints = [...report.errors, ...report.warnings]
+  assert.ok(
+    !complaints.some((e) => e.includes('network.allowlist')),
+    `loopback host flagged: ${complaints.join(' | ')}`,
+  )
+})
+
+test('a ! line re-includes a metadata file and a screenshots asset', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+  fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
+  }))
+  fs.writeFileSync(path.join(tmp, 'index.html'), '<html dir="rtl" lang="he"></html>')
+  fs.writeFileSync(path.join(tmp, 'help.md'), '# help')
+  fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '# log')
+  fs.mkdirSync(path.join(tmp, 'screenshots'))
+  fs.writeFileSync(path.join(tmp, 'screenshots', 'logo.png'), 'x')
+  fs.writeFileSync(path.join(tmp, 'screenshots', 'store-1.png'), 'x')
+  fs.mkdirSync(path.join(tmp, '.well-known'))
+  fs.writeFileSync(path.join(tmp, '.well-known', 'keys.json'), '{}')
+  fs.writeFileSync(path.join(tmp, '.otzignore'),
+    '!help.md\n!screenshots/logo.png\n!.well-known/keys.json\n')
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+  const res = buildOtzplugin(tmp, out)
+  const names = [...extractZipFiles(fs.readFileSync(out)).keys()]
+  assert.ok(names.includes('help.md'), '!help.md should override the metadata exclusion')
+  assert.ok(names.includes('screenshots/logo.png'), '! should reach into screenshots/')
+  assert.ok(names.includes('.well-known/keys.json'), '! should reach into a hidden dir')
+  assert.ok(!names.includes('CHANGELOG.md'), 'un-negated .md stays excluded')
+  assert.ok(!names.includes('screenshots/store-1.png'), 'un-negated asset stays excluded')
+  assert.ok(!names.includes('.otzignore'), '.otzignore itself is never packed')
+  assert.ok(res.metadataExcluded.includes('CHANGELOG.md'), 'metadata exclusions are reported')
+  assert.ok(res.metadataExcluded.includes('screenshots/store-1.png'))
+})
+
+test('zipWriter rejects an entrypoint that would not be packed', () => {
+  const mk = (entrypoint, extra) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
+    fs.writeFileSync(path.join(tmp, 'manifest.json'), '{}')
+    const f = path.join(tmp, entrypoint)
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, 'x')
+    if (extra) fs.writeFileSync(path.join(tmp, '.otzignore'), extra)
+    return tmp
+  }
+  const out = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+
+  assert.throws(
+    () => buildOtzplugin(mk('index.md'), out(), { entrypoint: 'index.md' }),
+    /מטא-דאטה/,
+    'a .md entrypoint must fail loudly',
+  )
+  assert.throws(
+    () => buildOtzplugin(mk('app/index.html', 'app/\n'), out(), { entrypoint: 'app/index.html' }),
+    /\.otzignore/,
+    'an .otzignore-excluded entrypoint must fail loudly',
+  )
+  assert.throws(
+    () => buildOtzplugin(mk('bg/worker.html', 'bg/\n'), out(), {
+      entrypoint: 'bg/worker.html', backgroundEntrypoint: 'bg/worker.html',
+    }),
+    /\.otzignore/,
+    'an excluded background entrypoint must fail loudly',
+  )
+  // A `!` line brings the metadata entrypoint back — no throw.
+  const okRoot = mk('index.md', '!index.md\n')
+  const okOut = out()
+  buildOtzplugin(okRoot, okOut, { entrypoint: 'index.md' })
+  assert.ok([...extractZipFiles(fs.readFileSync(okOut)).keys()].includes('index.md'))
+})
+
 test('publish syncs metadata fields from manifest (admin-equivalent update)', () => {
   const manifest = {
     name: 'New Name', version: '2.0.0', minAppVersion: '0.9.95',
@@ -528,94 +638,69 @@ test('pr comment body embeds the marker and an optional run link', () => {
   assert.ok(buildCommentBody('| a | b |', 'https://x/runs/1').includes('[הרצה מלאה](https://x/runs/1)'))
 })
 
-test('API reference markdown parser extracts methods and permissions', () => {
-  const md = [
-    '### `app.getInfo`',
-    '### `app.getTheme`',
-    '### `app.getLocale`',
-    '### `library.getBookContent`',
-    '### `library.getBookToc`',
-    '### `reader.openBook`',
-    '### `notes.add`',
-    '### `notes.update`',
-    '### `settings.get`',
-    '### `calendar.getEvents`',
-    '**הרשאה נדרשת:** `app.info.read`',
-    "Otzaria.call('library.findBooks', {})",
-    '`library.books.read`',
-    "Otzaria.on('theme.changed', cb)",
-    'events.subscribe:settings.changed',
-    '`reader.open` `notes.read` `notes.write` `calendar.read` `ui.feedback`',
-    '| `app.getInfo` | 0.9.89 |',
-    '| `shortcut.create` | 0.9.94 |',
-  ].join('\n')
-  const parsed = parseApiReferenceMarkdown(md)
+test('parseSpecJson קורא את המפרט המחולל ומשלב methods שאינם מתועדים', () => {
+  const parsed = parseSpecJson(JSON.stringify({
+    schemaVersion: 1,
+    permissions: ['app.info.read', 'library.books.read', 'notes.read', 'notes.write', 'ui.feedback'],
+    apiMethods: [
+      'app.getInfo', 'app.getTheme', 'library.findBooks', 'notes.list', 'notes.add',
+      'notes.update', 'notes.delete', 'ui.showMessage', 'storage.get', 'storage.set',
+    ],
+    undocumentedApiMethods: ['plugin.listInstalled'],
+    methodPermissions: { 'library.findBooks': 'library.books.read' },
+    methodMinVersions: { 'app.getInfo': '0.9.89', 'library.findBooks': '0.9.89' },
+    events: ['theme.changed'],
+    settings: { policy: 'blocklist', blockedSubstrings: ['path'], blockedPrefixes: [], blockedKeys: ['key-tabs'] },
+    manifest: { stability: ['stable'] },
+    versions: { whenCondition: '0.9.97' },
+  }))
+  assert.strictEqual(parsed.source, 'remote')
   assert.ok(parsed.apiMethods.has('app.getInfo'))
-  assert.ok(parsed.apiMethods.has('library.findBooks'))
-  assert.ok(parsed.permissions.has('app.info.read'))
-  assert.ok(parsed.permissions.has('events.subscribe:settings.changed'))
+  // methods שאינם מתועדים נכללים כדי שלא יסומנו כ"לא מוכרים"
+  assert.ok(parsed.apiMethods.has('plugin.listInstalled'))
+  assert.ok(parsed.permissions.has('library.books.read'))
   assert.ok(parsed.events.has('theme.changed'))
   assert.strictEqual(parsed.methodMinVersions.get('app.getInfo'), '0.9.89')
-  assert.strictEqual(parsed.methodMinVersions.get('shortcut.create'), '0.9.94')
+  assert.strictEqual(parsed.methodPermissions.get('library.findBooks'), 'library.books.read')
 })
 
-test('method → permission נגזר מהמסמך: שורה רגילה, "נדרשת", ונספח מגרסה', () => {
-  const md = [
-    '## `library.*`',
-    '### `library.findBooks`',
-    '**הרשאה:** `library.books.read`',
-    '### `library.getBookContent`',
-    '**הרשאה נדרשת:** `library.content.read`',
-    '### `plugin.openOther`',
-    '**הרשאה:** `plugin.open_other` | **מגרסה:** 0.9.97',
-    '### `calendar.getCities`',
-    '**הרשאה:** `calendar.read` · **מגרסה:** 0.9.97',
-    '### `network.fetch`',
-    '**הרשאה:** `network.access` (או `network.localhost` ליעד מקומי)',
-  ].join('\n')
-  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
-  assert.strictEqual(m.get('library.findBooks'), 'library.books.read')
-  assert.strictEqual(m.get('library.getBookContent'), 'library.content.read')
-  assert.strictEqual(m.get('plugin.openOther'), 'plugin.open_other')
-  assert.strictEqual(m.get('calendar.getCities'), 'calendar.read')
-  // חלופת localhost נבדקת בנפרד ב-extendedValidator; כאן נלקחת ההרשאה הראשית.
-  assert.strictEqual(m.get('network.fetch'), 'network.access')
+test('parseSpecJson דוחה מפרט קטוע, סכימה לא נתמכת, ושדה חסר', () => {
+  const valid = {
+    schemaVersion: 1,
+    permissions: ['a.b', 'a.c', 'a.d', 'a.e', 'a.f'],
+    apiMethods: Array.from({ length: 10 }, (_, i) => `n.m${i}`),
+    undocumentedApiMethods: [],
+    methodPermissions: {},
+    methodMinVersions: {},
+    events: [],
+    settings: { policy: 'blocklist', blockedSubstrings: [], blockedPrefixes: [], blockedKeys: [] },
+    manifest: { stability: ['stable'] },
+    versions: { whenCondition: '0.9.97' },
+  }
+  assert.ok(parseSpecJson(JSON.stringify(valid)))
+  assert.throws(() => parseSpecJson(JSON.stringify({ ...valid, schemaVersion: 99 })), /schemaVersion/)
+  assert.throws(() => parseSpecJson(JSON.stringify({ ...valid, apiMethods: ['a.b'] })), /malformed/)
+  const noEvents = { ...valid }
+  delete noEvents.events
+  assert.throws(() => parseSpecJson(JSON.stringify(noEvents)), /events/)
+  assert.throws(() => parseSpecJson('not json'), /./)
 })
 
-test('"אין הרשאה" אינו מייצר מיפוי, גם כשמוזכרת הרשאה אחרת בהמשך השורה', () => {
-  const md = [
-    '### `plugin.backgroundDone`',
-    '**הרשאה:** אין | **מגרסה:** 0.9.97',
-    '### `fs.deleteFile`',
-    '**הרשאה:** (אין — מגודר ע"י `ui.pickFolder`)',
-    '### `ui.messageClicked` (Event)',
-    '**הרשאה:** `ui.feedback`',
-  ].join('\n')
-  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
-  assert.ok(!m.has('plugin.backgroundDone'))
-  assert.ok(!m.has('fs.deleteFile'))
-  // כותרת (Event) אינה method שנקרא ב-Otzaria.call
-  assert.ok(!m.has('ui.messageClicked'))
-})
-
-test('API בלי שורת הרשאה יורש את הצהרת ה-domain שמעליו', () => {
-  const md = [
-    '## `app.*` - מידע על האפליקציה',
-    '**הרשאה נדרשת:** `app.info.read` (למעט `app.getUserEmail`)',
-    '### `app.getInfo`',
-    'טקסט בלי שורת הרשאה',
-    '### `app.getUserEmail`',
-    '**הרשאה נדרשת:** `app.user_email.read`',
-    '## `notes.*`',
-    '### `notes.list`',
-    '**הרשאה:** `notes.read`',
-  ].join('\n')
-  const m = parseApiReferenceMarkdown(md + '\n' + MIN_SPEC_TAIL).methodPermissions
-  assert.strictEqual(m.get('app.getInfo'), 'app.info.read')
-  // הצהרה מפורשת גוברת על ירושת ה-domain
-  assert.strictEqual(m.get('app.getUserEmail'), 'app.user_email.read')
-  // ירושה אינה חוצה גבול domain
-  assert.strictEqual(m.get('notes.list'), 'notes.read')
+test('העותק המצורף src/spec.json הוא מפרט תקף, והרצפה נגזרת ממנו', () => {
+  const parsed = parseSpecJson(vendoredSpec)
+  const floor = buildFallbackSpec()
+  assert.strictEqual(floor.source, 'vendored')
+  for (const method of parsed.apiMethods) {
+    if (vendoredSpec.undocumentedApiMethods.includes(method)) continue
+    assert.ok(floor.apiMethods.has(method), `method חסר ברצפה: ${method}`)
+  }
+  for (const permission of parsed.permissions) {
+    assert.ok(floor.permissions.has(permission), `הרשאה חסרה ברצפה: ${permission}`)
+  }
+  // כל method מתועד נושא גרסת מינימום — אחרת אכיפת הגרסאות נעלמת בשקט
+  for (const method of vendoredSpec.apiMethods) {
+    assert.ok(floor.methodMinVersions.has(method), `גרסה חסרה: ${method}`)
+  }
 })
 
 test('mergeWithFallback: המסמך מוסיף מיפויים אך אינו דורס את המפה המובנית', () => {
@@ -883,10 +968,13 @@ test('key ריק או ארוך מ-128 תווים נפסל', () => {
 })
 
 test('עלה setting על מפתח שאינו זמין לתוספים נפסל', () => {
+  // מדיניות blocklist: מפתח שאינו חסום עובר — גם אם אינו מוכר לוולידטור
   const unknown = whenPlugin(toolbarWhen({ setting: { key: 'key-no-such-setting', equals: 1 } }))
+  assert.deepStrictEqual(unknown.errors, [], unknown.errors.join(' | '))
+  const secret = whenPlugin(toolbarWhen({ setting: { key: 'key-some-secret', equals: 1 } }))
   assert.ok(
-    unknown.errors.some((e) => e.includes('שאינה זמינה לתוספים') && e.includes('key-no-such-setting')),
-    'expected allowlist error: ' + unknown.errors.join(' | ')
+    secret.errors.some((e) => e.includes('שאינה זמינה לתוספים') && e.includes('key-some-secret')),
+    'expected blocked-substring error: ' + secret.errors.join(' | ')
   )
   // מפתח חסום לקריאה — מוערך כ-false בזמן ריצה, ולכן נפסל כבר כאן
   const blocked = whenPlugin(toolbarWhen({ setting: { key: 'key-library-path', exists: true } }))
@@ -926,33 +1014,99 @@ test('contributes.startup בלי when אינו נוגע בתוסף קיים', ()
   assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
 })
 
-test('רשימת ההגדרות המורשות נגזרת מהמסמך, ובפורמט שבור נשמרת הרצפה', () => {
-  const md = [
-    '**מפתחות מורשים לקריאה:**',
-    '- `key-dark-mode`',
-    '- `key-swatch-color`, `key-dark-swatch-color`',
-    '- `key-brand-new-setting`',
-    '- `key-hebrew-books-path` — נתיב ספרי HebrewBooks, או `null`/מחרוזת ריקה',
-    '  כשלא הוגדר מיקום',
-    '',
-    '---',
-    '- `key-not-in-the-list`',
-  ].join('\n')
-  const keys = parseSettingReadKeys(md)
-  assert.ok(keys.has('key-brand-new-setting'), 'מפתח חדש מהמסמך חסר')
-  assert.ok(keys.has('key-dark-swatch-color'), 'מפתח שני באותה שורה חסר')
-  assert.ok(!keys.has('key-not-in-the-list'), 'הפרסור לא נעצר בסוף הרשימה')
-  assert.strictEqual(parseSettingReadKeys('אין כאן רשימה'), null)
+test('מדיניות ההגדרות היא blocklist הנגזרת מהמפרט', () => {
+  // מה שאינו חסום — קריא, גם מפתח שהוולידטור לא מכיר
+  assert.ok(!isBlockedSettingKey('key-dark-mode'))
+  assert.ok(!isBlockedSettingKey('key-brand-new-setting'))
+  // חלק-מפתח חסום תופס גם הגדרה שלא נרשמה מעולם
+  assert.ok(isBlockedSettingKey('key-library-path'))
+  assert.ok(isBlockedSettingKey('key-some-new-secret'))
+  assert.ok(isBlockedSettingKey('key-google-calendar-anything'))
+  assert.ok(isBlockedSettingKey('sz:progress'))
+  assert.ok(isBlockedSettingKey(''))
+  assert.ok(isBlockedSettingKey('  KEY-TABS  '), 'נירמול רווחים/רישיות חסר')
+  // כל מה שהמפרט מסמן כחסום — אכן חסום
+  for (const key of vendoredSpec.settings.blockedKeys) {
+    assert.ok(isBlockedSettingKey(key), `מפתח חסום דלף: ${key}`)
+  }
+})
 
-  // הרצפה המובנית נשמרת גם כשהמסמך מפגר, והמסמך רק מרחיב אותה
-  const merged = mergeWithFallback({
-    permissions: new Set(), apiMethods: new Set(), methodMinVersions: new Map(),
-    methodPermissions: new Map(), events: new Set(),
-    settingKeys: new Set(['key-brand-new-setting']),
-    source: 'remote',
+// ---- Public package API ------------------------------------------------------
+// החנות (Otzaria_Website) צורכת את החבילה דרך src/index.js. הבדיקות כאן הן
+// חוזה: שבירתן שוברת את החנות בבנייה הבאה, כי היא מרעננת את #v1 בכל בנייה.
+
+test('src/index.js הוא API טהור ואינו מריץ את ה-Action', () => {
+  const api = require('../src/index')
+  for (const name of [
+    'SPEC', 'getApiSpec', 'parseSpecJson', 'buildFallbackSpec', 'mergeWithFallback',
+    'buildManifest', 'validateManifestFields', 'MANIFEST_RULES', 'ALL_MANIFEST_RULES',
+    'compareCoreVersions', 'validateWhenConditions', 'validateStartupWhenConditions',
+    'analyzeApiUsage', 'runExtendedValidation', 'checkDesignCompliance',
+    'isCodeLikeFile', 'isStyleLikeFile', 'analyzeReachability', 'validateSource',
+    'extractZipFiles', 'isBlockedSettingKey',
+  ]) {
+    assert.ok(api[name] !== undefined, `חסר בייצוא הציבורי: ${name}`)
+  }
+  assert.equal(api.SPEC.schemaVersion, 1)
+  // המפרט נוסע בתוך החבילה — src/spec.json תחת files
+  assert.ok(require('../package.json').files.includes('src'))
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'src', 'spec.json')))
+})
+
+test('buildManifest lenient: שדה חסר אינו זורק ומסומן ב-declared', () => {
+  const { buildManifest } = require('../src/manifestValidator')
+  assert.throws(() => buildManifest({ id: 'a' }))
+  const lenient = buildManifest({ id: 'a' }, { lenient: true })
+  assert.equal(lenient.name, '')
+  assert.equal(lenient.declared.name, false)
+  assert.equal(lenient.toolTabTitle, '')
+  // כלל הכותרת מדלג על מניפסט בלי name — כך החנות לא מדווחת על שדה שלא נכתב
+  assert.deepEqual(
+    validateManifestFields({ manifest: lenient, validPermissions: spec.permissions, rules: ['toolTabTitle'] }),
+    []
+  )
+})
+
+test('validateManifestFields עם תת-קבוצת כללים מריץ אותם בלבד', () => {
+  const manifest = buildManifest({
+    id: 'BAD ID', name: 'ש', version: 'not-semver', entrypoint: 'index.html',
+    stability: 'nope',
   })
-  assert.ok(merged.settingKeys.has('key-brand-new-setting'))
-  assert.ok(merged.settingKeys.has('key-line-height'))
+  const all = validateManifestFields({ manifest, validPermissions: spec.permissions })
+  assert.ok(all.length >= 3)
+  const subset = validateManifestFields({
+    manifest, validPermissions: spec.permissions, rules: ['name', 'description'],
+  })
+  assert.deepEqual(subset, [])
+  assert.throws(() => validateManifestFields({
+    manifest, validPermissions: spec.permissions, rules: ['noSuchRule'],
+  }), /unknown manifest rule/)
+})
+
+test('analyzeApiUsage מחזיר ממצאים מקובצים ובלי חומרה, וקורא Buffer', () => {
+  const { analyzeApiUsage } = require('../src/extendedValidator')
+  const manifest = buildManifest({
+    id: 'x.y', name: 'בדיקה', version: '1.0.0', entrypoint: 'index.html',
+    minAppVersion: '0.9.97', permissions: ['app.info.read'],
+  })
+  const files = new Map([
+    ['main.js', Buffer.from("Otzaria.call('notes.add', {})\nOtzaria.call('no.suchApi', {})", 'utf8')],
+  ])
+  const usage = analyzeApiUsage({ manifest, files, spec })
+  assert.deepEqual(usage.unknownMethods.map((f) => f.method), ['no.suchApi'])
+  assert.deepEqual(usage.missingPermissions.map((f) => f.permission), ['notes.write'])
+  // הרשאת בסיס מוצהרת היא דלי נפרד — החנות ממפה אותו ל-advisory, ה-Action לאזהרה
+  assert.deepEqual(usage.baselinePermissions.map((f) => f.permission), ['app.info.read'])
+  assert.deepEqual(usage.permissionVersionErrors, [])
+  assert.deepEqual(usage.methodVersionErrors, [])
+})
+
+test('checkDesignCompliance קורא גם Buffer וגם מחרוזת', () => {
+  const html = '<!doctype html><html dir="rtl" lang="he"><style>a{color:var(--color-text)}</style></html>'
+  const fromText = checkDesignCompliance(new Map([['a.html', html]]))
+  const fromBuffer = checkDesignCompliance(new Map([['a.html', Buffer.from(html, 'utf8')]]))
+  assert.deepEqual(fromBuffer, fromText)
+  assert.equal(fromText.compliant, true)
 })
 
 Promise.all(pending).then(() => {

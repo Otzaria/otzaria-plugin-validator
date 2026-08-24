@@ -5,8 +5,7 @@
 // ._validateWhenConditions, including the activationEvents object form.
 
 const {
-  FALLBACK_SETTING_READ_KEYS,
-  BLOCKED_SETTING_KEYS,
+  isBlockedSettingKey,
   WHEN_CONDITION_MIN_VERSION,
 } = require('./knownApi')
 const { compareCoreVersions } = require('./manifestValidator')
@@ -122,8 +121,6 @@ function validateWhenConditions({ manifest, spec }) {
   const startup = contributes && isPlainObject(contributes.startup) ? contributes.startup : null
   if (!startup) return errors
 
-  const readableKeys =
-    (spec && spec.settingKeys) || new Set(FALLBACK_SETTING_READ_KEYS)
   let hasWhen = false
 
   const validateRaw = (field, when) => {
@@ -138,7 +135,7 @@ function validateWhenConditions({ manifest, spec }) {
       return
     }
     for (const key of settingKeys) {
-      if (readableKeys.has(key) && !BLOCKED_SETTING_KEYS.has(key)) continue
+      if (!isBlockedSettingKey(key)) continue
       errors.push(
         `contributes.startup.${field}: when קורא הגדרה שאינה זמינה לתוספים ("${key}")`
       )
@@ -189,4 +186,21 @@ function validateWhenConditions({ manifest, spec }) {
   return errors
 }
 
-module.exports = { validateWhenConditions }
+/**
+ * Same rules, entered from a raw parsed manifest.json instead of the
+ * normalized manifest — for a consumer that never builds one (the store).
+ *
+ * @param {object} rawManifest parsed manifest.json
+ * @returns {string[]} blocking errors
+ */
+function validateStartupWhenConditions(rawManifest) {
+  const raw = isPlainObject(rawManifest) ? rawManifest : {}
+  return validateWhenConditions({
+    manifest: {
+      raw,
+      minAppVersion: typeof raw.minAppVersion === 'string' ? raw.minAppVersion : '0.0.0',
+    },
+  })
+}
+
+module.exports = { validateWhenConditions, validateStartupWhenConditions }

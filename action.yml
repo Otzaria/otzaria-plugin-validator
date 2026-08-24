@@ -26,10 +26,18 @@ inputs:
       checked against it (blocking). Empty (default) skips the check.
     required: false
     default: ''
+  spec-url:
+    description: >-
+      Override the URL of the official machine-readable SDK spec (spec.json)
+      fetched in real time. Defaults to Otzaria/otzaria@dev. On fetch failure the
+      vendored copy shipped with this action is used — it is the same generated
+      artifact, so the result does not depend on network availability.
+    required: false
+    default: ''
   api-reference-url:
     description: >-
-      Override the URL of the official API_REFERENCE.md fetched in real time.
-      Defaults to Otzaria/otzaria@dev. On fetch failure a built-in fallback is used.
+      Deprecated and ignored. The SDK surface now comes from spec.json, not from
+      API_REFERENCE.md. Use 'spec-url'.
     required: false
     default: ''
   pr-comment:
@@ -144,4 +152,4 @@ outputs:
 
 runs:
   using: 'node20'
-  main: 'src/index.js'
+  main: 'src/action.js'

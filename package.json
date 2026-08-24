@@ -1,6 +1,6 @@
 {
   "name": "otzaria-plugin-validator",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "description": "GitHub Action to validate Otzaria plugins against the live SDK reference.",
   "main": "src/index.js",
   "bin": {
@@ -17,6 +17,7 @@
   "scripts": {
     "test": "node test/run.js",
     "test:spec-drift": "node test/specDrift.js",
+    "sync:spec": "node scripts/sync-spec.js",
     "validate": "node src/cli.js"
   },
   "keywords": [

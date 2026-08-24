@@ -88,7 +88,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
 
   if (manifestText == null) {
     errors.push('הקובץ manifest.json לא נמצא. תוסף תקין חייב לכלול manifest.json בשורש.')
-    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [] }
+    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [], missing: [] }
   }
 
   let json
@@ -96,7 +96,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
     json = parseManifestJson(manifestText)
   } catch (e) {
     errors.push(`הקובץ manifest.json אינו JSON תקין: ${e.message}`)
-    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [] }
+    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [], missing: [] }
   }
 
   let manifest
@@ -104,7 +104,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
     manifest = buildManifest(json)
   } catch (e) {
     errors.push(`נכשלה קריאת manifest.json לתוך מבנה PluginManifest: ${e.message}`)
-    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [] }
+    return { label, manifestFile, errors, warnings: [], design: null, manifest: null, unreferenced: [], missing: [] }
   }
 
   for (const err of validateManifestFields({
@@ -154,12 +154,19 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
 
   // Blocking errors stop here, exactly like the packager (extended runs only on success).
   if (errors.length > 0) {
-    return { label, manifestFile, errors, warnings: [], design: null, manifest, unreferenced: [] }
+    return { label, manifestFile, errors, warnings: [], design: null, manifest, unreferenced: [], missing: [] }
   }
 
   const { errors: extErrors, warnings, design } = runExtendedValidation({ manifest, files: fileTexts, spec })
-  const { unreferenced } = analyzeReachability({ allNames: allNames || [], texts: fileTexts, manifest })
-  return { label, manifestFile, errors: extErrors, warnings, design, manifest, unreferenced }
+  const { unreferenced, missing } = analyzeReachability({ allNames: allNames || [], texts: fileTexts, manifest })
+  if (missing.length > 0) {
+    warnings.push(
+      `${missing.length} הפניות לנכס מקומי שאינו בארכיון — יחזירו 404 בזמן ריצה. ` +
+        'קובץ מטא-דאטה (‎*.md‎, ‎screenshots/‎) מוחזר לארכיון בשורת "!<נתיב>" ב-.otzignore: ' +
+        missing.join(', ')
+    )
+  }
+  return { label, manifestFile, errors: extErrors, warnings, design, manifest, unreferenced, missing }
 }
 
 function validateSource(source, opts) {

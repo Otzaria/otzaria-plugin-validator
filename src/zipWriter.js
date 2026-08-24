@@ -4,7 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const zlib = require('zlib')
 const { SKIP_DIRS, isMetadataDir, isMetadataFile } = require('./knownApi')
-const { loadIgnore } = require('./ignore')
+const { loadIgnore, IGNORE_FILENAME } = require('./ignore')
 
 // Minimal ZIP writer for building .otzplugin archives (deflate + CRC32).
 // Produces a standard archive that the store's unzipper (fflate) and the
@@ -30,40 +30,68 @@ function crc32(buf) {
 
 // Collect packable files from a plugin directory, skipping dev dirs, the output
 // file itself, and anything matched by the plugin's optional .otzignore.
-// Returns { files: [{ name, data }], excluded: number } with forward-slash names.
+// A metadata file/dir (docs, LICENSE, screenshots/, .well-known/...) is packed
+// only when an explicit `!` line in .otzignore re-includes it.
+// Returns { files, excluded, metadataExcluded, ignore } with forward-slash names.
 function collectFiles(root, outputAbs) {
   const out = []
   let excluded = 0
+  const metadataExcluded = []
   const ignore = loadIgnore(root)
-  const walk = (dir) => {
+  const walk = (dir, inMetadata) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, ent.name)
       const rel = path.relative(root, full).replace(/\\/g, '/')
       if (ent.isDirectory()) {
-        if (SKIP_DIRS.has(ent.name) || isMetadataDir(ent.name)) continue
-        // Prune an ignored directory wholesale. Skip the shortcut when the file
-        // uses `!` re-includes, since a child might need to be packed.
+        if (SKIP_DIRS.has(ent.name)) continue
+        const meta = inMetadata || isMetadataDir(ent.name)
+        // Without any `!` line nothing inside a metadata dir can come back, so
+        // prune it — and prune a plainly ignored dir the same way.
+        if (meta && !ignore.hasNegation) continue
         if (!ignore.hasNegation && ignore.ignores(rel)) continue
-        walk(full)
+        walk(full, meta)
       } else if (ent.isFile()) {
         if (path.resolve(full) === outputAbs) continue
-        if (isMetadataFile(rel)) continue
-        if (ignore.ignores(rel)) { excluded++; continue }
+        if (ent.name === IGNORE_FILENAME) continue
+        if (inMetadata || isMetadataFile(rel)) {
+          if (!ignore.reIncludes(rel)) { metadataExcluded.push(rel); continue }
+        } else if (ignore.ignores(rel)) { excluded++; continue }
         out.push({ name: rel, data: fs.readFileSync(full) })
       }
     }
   }
-  walk(root)
-  return { files: out, excluded }
+  walk(root, false)
+  return { files: out, excluded, metadataExcluded, ignore }
+}
+
+// A packed entrypoint that silently never lands in the archive breaks the
+// plugin at runtime with no error — mirror the Dart packager and fail loudly.
+function assertEntrypointPacked(files, ignore, label, entrypoint) {
+  if (!entrypoint) return
+  const rel = entrypoint.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (files.some((f) => f.name === rel)) return
+  const reason = ignore.ignores(rel)
+    ? `מוחרג ע"י ${IGNORE_FILENAME}`
+    : 'מסווג כקובץ/תיקיית מטא-דאטה ולכן מוחרג מהאריזה'
+  throw new Error(
+    `${label} "${entrypoint}" ${reason} ולכן לא ייכלל ב-.otzplugin. ` +
+      `הוצא אותו מהתיקיות המוחרגות, או החזר אותו עם שורת "!${rel}" ב-${IGNORE_FILENAME}.`,
+  )
 }
 
 /**
  * Build a .otzplugin archive from a plugin directory.
+ * @param {object} [manifest] parsed manifest — enables the entrypoint guard.
  * @returns {{ path:string, fileCount:number, bytes:number, sha256:string }}
  */
-function buildOtzplugin(root, outputPath) {
+function buildOtzplugin(root, outputPath, manifest) {
   const outputAbs = path.resolve(outputPath)
-  const { files, excluded } = collectFiles(root, outputAbs)
+  const { files, excluded, metadataExcluded, ignore } = collectFiles(root, outputAbs)
+
+  if (manifest) {
+    assertEntrypointPacked(files, ignore, 'קובץ הכניסה', manifest.entrypoint)
+    assertEntrypointPacked(files, ignore, 'קובץ הרקע', manifest.backgroundEntrypoint)
+  }
 
   const locals = []
   const centrals = []
@@ -117,7 +145,14 @@ function buildOtzplugin(root, outputPath) {
 
   const crypto = require('crypto')
   const sha256 = crypto.createHash('sha256').update(archive).digest('hex')
-  return { path: outputPath, fileCount: files.length, excludedCount: excluded, bytes: archive.length, sha256 }
+  return {
+    path: outputPath,
+    fileCount: files.length,
+    excludedCount: excluded,
+    metadataExcluded,
+    bytes: archive.length,
+    sha256,
+  }
 }
 
 module.exports = { buildOtzplugin, crc32 }
