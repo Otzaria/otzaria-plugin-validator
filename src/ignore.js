@@ -90,7 +90,16 @@ function buildMatcher(lines) {
     }
     return excluded
   }
-  return { ignores, hasNegation, count: rules.length }
+  // True when the LAST rule matching relPath is a `!` re-include. Lets an
+  // explicit `!` win over the metadata-file/dir exclusion when packaging.
+  const reIncludes = (relPath) => {
+    let negated = false
+    for (const r of rules) {
+      if (r.test(relPath)) negated = r.negate
+    }
+    return negated
+  }
+  return { ignores, reIncludes, hasNegation, count: rules.length }
 }
 
 /**

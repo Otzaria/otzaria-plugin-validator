@@ -22,7 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm run test:spec-drift
+      # --require-live: ל-CI יש רשת, ולכן דילוג כאן משמעו תקלה — לא ירוק שקט.
+      # ‏אדום צפוי עד ש-docs/plugin-sdk/spec.json יגיע ל-Otzaria/otzaria@dev:
+      # זהו כשל אמיתי של תלות סדר, ועדיף עליו מבדיקה מוחלשת שעוברת.
+      - run: npm run test:spec-drift -- --require-live
 
   self-test-valid:
     runs-on: ubuntu-latest

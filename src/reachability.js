@@ -59,6 +59,7 @@ function refsFromJs(text) {
     /\brequire\(\s*["']([^"']+)["']\s*\)/g,
     /new\s+Worker\(\s*["']([^"']+)["']/g,
     /new\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url/g,
+    /\bfetch\(\s*["']([^"']+)["']/g,
   ]
   for (const re of patterns) {
     while ((m = re.exec(text)) !== null) out.push(m[1])
@@ -82,11 +83,14 @@ function resolveRef(fromFile, ref, allSet) {
  * @param {string[]} args.allNames every packaged file name (forward-slash, relative)
  * @param {Map<string,string>} args.texts contents of HTML/CSS/JS files
  * @param {object} args.manifest normalized manifest (entrypoint, icon, raw)
- * @returns {{reachable:string[], unreferenced:string[]}}
+ * @returns {{reachable:string[], unreferenced:string[], missing:string[]}}
  */
 function analyzeReachability({ allNames, texts, manifest }) {
   const allSet = new Set(allNames)
   const reachable = new Set()
+  // Local refs with a file extension that resolve to nothing in the archive —
+  // an asset dropped by the packaging rules 404s silently at runtime.
+  const missing = new Set()
   const queue = []
   const enqueue = (name) => {
     if (name && allSet.has(name) && !reachable.has(name)) {
@@ -113,11 +117,12 @@ function analyzeReachability({ allNames, texts, manifest }) {
       if (isExternal(ref)) continue
       const resolved = resolveRef(name, ref, allSet)
       if (resolved) enqueue(resolved)
+      else if (/[^/]\.[a-z0-9]{1,6}$/i.test(ref)) missing.add(`${name} → ${ref}`)
     }
   }
 
   const unreferenced = allNames.filter((n) => n !== 'manifest.json' && !reachable.has(n)).sort()
-  return { reachable: [...reachable], unreferenced }
+  return { reachable: [...reachable], unreferenced, missing: [...missing].sort() }
 }
 
 module.exports = { analyzeReachability }

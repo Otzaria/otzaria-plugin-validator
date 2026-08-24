@@ -1,348 +1,88 @@
 'use strict'
 
-// Hardcoded snapshot of the official Otzaria plugin SDK surface.
-// Mirrors the constants in the Otzaria app
-// (lib/plugins/models/plugin_valid_permissions.dart,
-//  lib/plugins/services/plugin_extended_validator.dart)
-// and the website validator (src/lib/pluginValidation.js).
+// The Otzaria plugin SDK surface, read from the machine-readable spec that the
+// app generates from its own constants (tool/plugins/generate_plugin_spec.dart
+// in Otzaria/otzaria → docs/plugin-sdk/spec.json).
 //
-// These act as a FLOOR: the live API_REFERENCE.md fetched from GitHub only
-// ever EXPANDS the known set, so a lagging doc can never make a currently
-// valid plugin fail. Keep in sync when the official SDK changes.
+// The spec is VENDORED at src/spec.json, so the validator behaves identically
+// with or without network. `npm run sync:spec` refreshes it and
+// `npm run test:spec-drift` fails when it lags behind the app.
+//
+// Everything below that is NOT in the spec is a validator-local rule and is
+// marked as such.
 
-const FALLBACK_PERMISSIONS = [
-  'app.info.read',
-  'app.user_email.read',
-  'app.open_url',
-  'app.run_on_startup',
-  'app.background_keep_alive',
-  'app.startup_contributions',
-  'library.books.read',
-  'library.content.read',
-  'search.fulltext.read',
-  'reader.open',
-  'reader.context_menu',
-  'reader.toolbar',
-  'reader.highlight',
-  'search.dialog',
-  'navigation.write',
-  'plugin.open_other',
-  'notes.read',
-  'notes.write',
-  'calendar.read',
-  'settings.read',
-  'ui.feedback',
-  'ui.create_shortcut',
-  'fs.user_files.read',
-  'fs.folder_access',
-  'plugin.storage.read',
-  'plugin.storage.write',
-  'published_data.write',
-  'network.access',
-  'network.localhost',
-  'feedback.send_email',
-  'history.read',
-  'history.write',
-  'database.read',
-  'notifications.send',
-  'notifications.system',
-  'events.subscribe:navigation.changed',
-  'events.subscribe:reader.current_book_changed',
-  'events.subscribe:reader.current_ref_changed',
-  'events.subscribe:reader.selection_changed',
-  'events.subscribe:reader.sectionContentChanged',
-  'events.subscribe:theme.changed',
-  'events.subscribe:settings.changed',
-  'events.subscribe:calendar.date_changed',
-  'events.subscribe:calendar.city_changed',
-  'events.subscribe:workspace.changed',
-  'events.subscribe:plugin.permissions_changed',
-]
+const SPEC = require('./spec.json')
 
-// Baseline permissions (Otzaria >= 0.9.97): granted automatically to every
-// plugin. Declaring them is tolerated (deprecation warning only), and using
-// their APIs without declaring them is NOT a missing-permission warning.
-// Mirrors pluginBaselinePermissions in plugin_valid_permissions.dart.
-const BASELINE_PERMISSIONS = new Set([
-  'plugin.storage.read',
-  'plugin.storage.write',
-  'app.info.read',
-  'ui.feedback',
-  'notifications.send',
-  'events.subscribe:theme.changed',
-])
-
-// New permission (key) covered by a legacy declaration (value):
-// ui.pickFolder historically sat under ui.feedback.
-const LEGACY_PERMISSION_ALIASES = {
-  'fs.folder_access': 'ui.feedback',
+const SUPPORTED_SPEC_SCHEMA = 1
+if (SPEC.schemaVersion !== SUPPORTED_SPEC_SCHEMA) {
+  throw new Error(
+    `src/spec.json schemaVersion ${SPEC.schemaVersion} is not supported ` +
+      `(expected ${SUPPORTED_SPEC_SCHEMA}). Update the validator.`
+  )
 }
 
-// Minimum Otzaria version in which a declared permission exists. An older
-// minAppVersion is a blocking error — old Otzaria rejects unknown permissions.
+const FALLBACK_PERMISSIONS = [...SPEC.permissions]
+
+// Baseline permissions: granted to every plugin automatically. Using their APIs
+// without declaring them is not a warning; declaring them only earns a nudge.
+const BASELINE_PERMISSIONS = new Set(SPEC.baselinePermissions)
+
+// New permission (key) covered by a legacy declaration (value).
+const LEGACY_PERMISSION_ALIASES = { ...SPEC.legacyPermissionAliases }
+
+// VALIDATOR-LOCAL. Minimum Otzaria version in which a declared permission
+// exists. An older minAppVersion is a blocking error — old Otzaria rejects
+// unknown permissions. The app has no equivalent constant (it only ever sees
+// its own version), so this list is maintained here.
 const PERMISSION_MIN_VERSION = {
   'fs.folder_access': '0.9.97',
   'plugin.open_other': '0.9.97',
 }
 
-// Otzaria settings a plugin may read (settings.get, and a `when` leaf of kind
-// `setting`). Floor for the list parsed off the live doc; mirrors
-// PluginSettingsAccessPolicy.allowlist.
-const FALLBACK_SETTING_READ_KEYS = [
-  'key-dark-mode', 'key-follow-system-theme',
-  'key-swatch-color', 'key-dark-swatch-color',
-  'key-font-size', 'key-font-family',
-  'key-commentators-font-family', 'key-commentators-font-size',
-  'key-line-height',
-  'key-selected-city', 'key-calendar-type', 'key-settings-language',
-  'key-show-teamim', 'key-default-nikud', 'key-remove-nikud-tanach',
-  'key-replace-holy-names',
-  'key-library-view-mode',
-  'key-copy-with-headers', 'key-copy-header-format',
-  'key-hebrew-books-path',
-]
+// Which Otzaria settings a plugin may read (settings.get, and a `when` leaf of
+// kind `setting`). Since 0.9.97 the policy is a BLOCKLIST: everything is
+// readable except what the app blocks. Mirrors
+// PluginSettingsAccessPolicy.isBlocked — same order, same normalisation.
+const SETTINGS_POLICY = SPEC.settings
+if (SETTINGS_POLICY.policy !== 'blocklist') {
+  throw new Error(`unsupported settings policy "${SETTINGS_POLICY.policy}"`)
+}
+const BLOCKED_SETTING_KEYS = new Set(SETTINGS_POLICY.blockedKeys)
+const BLOCKED_SETTING_PREFIXES = SETTINGS_POLICY.blockedPrefixes
+const BLOCKED_SETTING_SUBSTRINGS = SETTINGS_POLICY.blockedSubstrings
 
-// Never readable even if a doc drift lists them — PluginSettingsAccessPolicy.blocklist.
-const BLOCKED_SETTING_KEYS = new Set([
-  'key-protected-mode-password-hash',
-  'key-google-calendar-client-secret',
-  'key-google-calendar-credentials-json',
-  'key-db-effective-path',
-  'key-library-path',
-  'key-index-path',
-  'key-backup-path',
-  'key-error-report-sender-email',
-])
-
-// contributes.startup `when` conditions exist from this version on.
-const WHEN_CONDITION_MIN_VERSION = '0.9.97'
-
-const FALLBACK_API_METHODS = [
-  'app.getInfo', 'app.getTheme', 'app.getLocale', 'app.getUserEmail', 'app.getGrantedPermissions',
-  'app.openUrl',
-  'library.findBooks', 'library.getBookMetadata', 'library.listRecentBooks',
-  'library.getBookContent', 'library.getBookToc',
-  'search.fullText',
-  'reader.openBook', 'reader.openBookAtRef', 'reader.getCurrentState', 'reader.getCurrentRef',
-  'reader.getSelection', 'reader.addContextMenuItem', 'reader.removeContextMenuItem',
-  'reader.setHighlight', 'reader.getHighlights', 'reader.clearHighlight', 'reader.clearAllHighlights',
-  'navigation.goTo',
-  'plugin.openSelf',
-  'plugin.openOther',
-  'notes.list', 'notes.getBookNotesSummary', 'notes.add', 'notes.update', 'notes.delete',
-  'ui.showMessage', 'ui.showSuccess', 'ui.showError', 'ui.showConfirm', 'ui.showWarning',
-  'feedback.sendEmail', 'feedback.report', 'feedback.hasReporterEmail',
-  'history.list', 'history.listSearches', 'history.clear', 'history.remove',
-  'notifications.showInApp', 'notifications.sendSystem', 'notifications.scheduleSystem',
-  'notifications.cancel', 'notifications.cancelAll', 'notifications.checkPermissions',
-  'notifications.requestPermissions',
-  'storage.get', 'storage.set', 'storage.remove', 'storage.list',
-  'settings.get', 'settings.getMany',
-  'calendar.getSelectedDate', 'calendar.getDailyTimes', 'calendar.getHalachicTimes',
-  'calendar.getJewishDate', 'calendar.getEvents', 'calendar.getCities',
-  'publishedData.upsert', 'publishedData.remove', 'publishedData.listOwn',
-  'database.listSources', 'database.describeSource', 'database.query', 'database.batchQuery',
-  'library.getTree',
-  'network.fetch', 'network.download',
-  'ui.pickFolder',
-  'fs.extractZip', 'fs.deleteFile',
-  'fs.pickUserFile', 'fs.resolveFileUrl', 'fs.readTextFile', 'fs.revokeFile',
-  'shortcut.create',
-]
-
-// Minimum Otzaria version each API was added in. Mirrors _methodMinVersion in
-// lib/plugins/services/plugin_extended_validator.dart and the version table in
-// docs/plugin-sdk/API_REFERENCE.md. A plugin that calls an API newer than its
-// declared minAppVersion is a blocking error. Keep in sync with the app + docs.
-const FALLBACK_METHOD_MIN_VERSION = {
-  // 0.9.89 — first plugin system (all base APIs)
-  'app.getInfo': '0.9.89',
-  'app.getTheme': '0.9.89',
-  'app.getLocale': '0.9.89',
-  'app.getUserEmail': '0.9.89',
-  'app.getGrantedPermissions': '0.9.89',
-  'library.findBooks': '0.9.89',
-  'library.getBookMetadata': '0.9.89',
-  'library.listRecentBooks': '0.9.89',
-  'library.getBookContent': '0.9.89',
-  'library.getBookToc': '0.9.89',
-  'search.fullText': '0.9.89',
-  'reader.openBook': '0.9.89',
-  'reader.openBookAtRef': '0.9.89',
-  'reader.getCurrentState': '0.9.89',
-  'reader.getCurrentRef': '0.9.89',
-  'reader.getSelection': '0.9.89',
-  'reader.addContextMenuItem': '0.9.89',
-  'reader.removeContextMenuItem': '0.9.89',
-  'reader.setHighlight': '0.9.89',
-  'reader.getHighlights': '0.9.89',
-  'reader.clearHighlight': '0.9.89',
-  'reader.clearAllHighlights': '0.9.89',
-  'navigation.goTo': '0.9.89',
-  'notes.list': '0.9.89',
-  'notes.getBookNotesSummary': '0.9.89',
-  'notes.add': '0.9.89',
-  'notes.update': '0.9.89',
-  'notes.delete': '0.9.89',
-  'ui.showMessage': '0.9.89',
-  'ui.showSuccess': '0.9.89',
-  'ui.showError': '0.9.89',
-  'ui.showConfirm': '0.9.89',
-  'ui.showWarning': '0.9.89',
-  'feedback.sendEmail': '0.9.89',
-  'history.list': '0.9.89',
-  'history.listSearches': '0.9.89',
-  'history.clear': '0.9.89',
-  'history.remove': '0.9.89',
-  'notifications.showInApp': '0.9.89',
-  'notifications.sendSystem': '0.9.89',
-  'notifications.scheduleSystem': '0.9.89',
-  'notifications.cancel': '0.9.89',
-  'notifications.cancelAll': '0.9.89',
-  'notifications.checkPermissions': '0.9.89',
-  'notifications.requestPermissions': '0.9.89',
-  'storage.get': '0.9.89',
-  'storage.set': '0.9.89',
-  'storage.remove': '0.9.89',
-  'storage.list': '0.9.89',
-  'settings.get': '0.9.89',
-  'settings.getMany': '0.9.89',
-  'calendar.getSelectedDate': '0.9.89',
-  'calendar.getDailyTimes': '0.9.89',
-  'calendar.getHalachicTimes': '0.9.89',
-  'calendar.getJewishDate': '0.9.89',
-  'calendar.getEvents': '0.9.89',
-  'calendar.getCities': '0.9.97',
-  'publishedData.upsert': '0.9.89',
-  'publishedData.remove': '0.9.89',
-  'publishedData.listOwn': '0.9.89',
-  'database.listSources': '0.9.89',
-  'database.describeSource': '0.9.89',
-  'database.query': '0.9.89',
-  'database.batchQuery': '0.9.89',
-  // 0.9.93
-  'library.getTree': '0.9.93',
-  'network.fetch': '0.9.93',
-  'network.download': '0.9.93',
-  'fs.deleteFile': '0.9.93',
-  'fs.extractZip': '0.9.93',
-  'ui.pickFolder': '0.9.93',
-  // 0.9.94
-  'shortcut.create': '0.9.94',
-  'fs.pickUserFile': '0.9.94',
-  'fs.readTextFile': '0.9.94',
-  'fs.resolveFileUrl': '0.9.94',
-  'fs.revokeFile': '0.9.94',
-  // 0.9.95
-  'app.openUrl': '0.9.95',
-  // 0.9.96
-  'plugin.openSelf': '0.9.96',
-  // 0.9.97
-  'plugin.openOther': '0.9.97',
-  'feedback.report': '0.9.97',
-  'feedback.hasReporterEmail': '0.9.97',
+function isBlockedSettingKey(key) {
+  const normalized = String(key == null ? '' : key).trim().toLowerCase()
+  if (normalized === '') return true
+  if (BLOCKED_SETTING_KEYS.has(normalized)) return true
+  if (BLOCKED_SETTING_PREFIXES.some((p) => normalized.startsWith(p))) return true
+  return BLOCKED_SETTING_SUBSTRINGS.some((part) => normalized.includes(part))
 }
 
-const FALLBACK_EVENTS = [
-  'plugin.boot', 'plugin.ready',
-  'plugin.suspended', 'plugin.resumed',
-  'plugin.page_opened',
-  'theme.changed',
-  'navigation.changed',
-  'reader.current_book_changed', 'reader.current_ref_changed',
-  'reader.selection_changed', 'reader.context_menu_item_clicked',
-  'calendar.date_changed', 'calendar.city_changed', 'workspace.changed',
-  'settings.changed', 'plugin.permissions_changed',
-]
+// contributes.startup `when` conditions exist from this version on.
+const WHEN_CONDITION_MIN_VERSION = SPEC.versions.whenCondition
 
-// APIs that exist in real plugins but are not documented publicly. Not warned on.
+const FALLBACK_API_METHODS = [...SPEC.apiMethods]
+
+// Minimum Otzaria version each API was added in. A plugin that calls an API
+// newer than its declared minAppVersion is a blocking error.
+const FALLBACK_METHOD_MIN_VERSION = { ...SPEC.methodMinVersions }
+
+const FALLBACK_EVENTS = [...SPEC.events]
+
+// APIs that exist in real plugins but are not documented publicly. The first
+// two come from the app's own list; the rest are VALIDATOR-LOCAL, kept so
+// plugins in the wild are not warned about them.
 const KNOWN_UNDOCUMENTED_METHODS = [
-  'network.fetch',
-  'plugin.listInstalled',
-  'plugin.requestInstall',
-  'plugin.uninstall',
+  ...new Set([...SPEC.undocumentedApiMethods, 'network.fetch', 'plugin.uninstall']),
 ]
 
 // method -> required permission. Used both for "missing permission" warnings
 // and as a hint when an invalid permission is declared in the manifest.
-const METHOD_REQUIRED_PERMISSION = {
-  'app.getInfo': 'app.info.read',
-  'app.getTheme': 'app.info.read',
-  'app.getLocale': 'app.info.read',
-  'app.getGrantedPermissions': 'app.info.read',
-  'app.getUserEmail': 'app.user_email.read',
-  'app.openUrl': 'app.open_url',
-  'library.findBooks': 'library.books.read',
-  'library.getBookMetadata': 'library.books.read',
-  'library.listRecentBooks': 'library.books.read',
-  'library.getTree': 'library.books.read',
-  'library.getBookContent': 'library.content.read',
-  'library.getBookToc': 'library.content.read',
-  'search.fullText': 'search.fulltext.read',
-  'reader.openBook': 'reader.open',
-  'reader.openBookAtRef': 'reader.open',
-  'reader.getCurrentState': 'reader.open',
-  'reader.getCurrentRef': 'reader.open',
-  'reader.getSelection': 'reader.open',
-  'reader.addContextMenuItem': 'reader.context_menu',
-  'reader.removeContextMenuItem': 'reader.context_menu',
-  'reader.setHighlight': 'reader.highlight',
-  'reader.getHighlights': 'reader.highlight',
-  'reader.clearHighlight': 'reader.highlight',
-  'reader.clearAllHighlights': 'reader.highlight',
-  'navigation.goTo': 'navigation.write',
-  'plugin.openSelf': 'navigation.write',
-  'plugin.openOther': 'plugin.open_other',
-  'notes.list': 'notes.read',
-  'notes.getBookNotesSummary': 'notes.read',
-  'notes.add': 'notes.write',
-  'notes.update': 'notes.write',
-  'notes.delete': 'notes.write',
-  'ui.showMessage': 'ui.feedback',
-  'ui.showSuccess': 'ui.feedback',
-  'ui.showError': 'ui.feedback',
-  'ui.showConfirm': 'ui.feedback',
-  'ui.showWarning': 'ui.feedback',
-  'ui.pickFolder': 'fs.folder_access',
-  'feedback.sendEmail': 'feedback.send_email',
-  'history.list': 'history.read',
-  'history.listSearches': 'history.read',
-  'history.clear': 'history.write',
-  'history.remove': 'history.write',
-  'notifications.showInApp': 'notifications.send',
-  'notifications.sendSystem': 'notifications.system',
-  'notifications.scheduleSystem': 'notifications.system',
-  'notifications.cancel': 'notifications.system',
-  'notifications.cancelAll': 'notifications.system',
-  'notifications.checkPermissions': 'notifications.system',
-  'notifications.requestPermissions': 'notifications.system',
-  'storage.get': 'plugin.storage.read',
-  'storage.set': 'plugin.storage.write',
-  'storage.remove': 'plugin.storage.write',
-  'storage.list': 'plugin.storage.read',
-  'settings.get': 'settings.read',
-  'settings.getMany': 'settings.read',
-  'calendar.getSelectedDate': 'calendar.read',
-  'calendar.getDailyTimes': 'calendar.read',
-  'calendar.getHalachicTimes': 'calendar.read',
-  'calendar.getJewishDate': 'calendar.read',
-  'calendar.getEvents': 'calendar.read',
-  'calendar.getCities': 'calendar.read',
-  'publishedData.upsert': 'published_data.write',
-  'publishedData.remove': 'published_data.write',
-  'publishedData.listOwn': 'published_data.write',
-  'database.listSources': 'database.read',
-  'database.describeSource': 'database.read',
-  'database.query': 'database.read',
-  'database.batchQuery': 'database.read',
-  'network.fetch': 'network.access',
-  'network.download': 'network.access',
-  'shortcut.create': 'ui.create_shortcut',
-  'fs.pickUserFile': 'fs.user_files.read',
-  'fs.resolveFileUrl': 'fs.user_files.read',
-  'fs.readTextFile': 'fs.user_files.read',
-  'fs.revokeFile': 'fs.user_files.read',
-}
+const METHOD_REQUIRED_PERMISSION = { ...SPEC.methodPermissions }
+
+// Allowed values of manifest `stability`.
+const VALID_STABILITY_VALUES = [...SPEC.manifest.stability]
 
 // Fields on the Otzaria holder object that are not API methods (shorthand scanner).
 const RESERVED_HOLDER_FIELDS = new Set([
@@ -380,13 +120,19 @@ function isMetadataFile(relName) {
 
 const TOOL_TAB_ICON_NAME_RE = /^[a-z0-9_]+_24_(regular|filled)$/
 
+// Bare hosts Otzaria accepts in network.allowlist without a scheme.
+// Mirrors _loopbackHosts in lib/plugins/models/plugin_network_allowlist.dart.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
 module.exports = {
   FALLBACK_PERMISSIONS,
   BASELINE_PERMISSIONS,
   LEGACY_PERMISSION_ALIASES,
   PERMISSION_MIN_VERSION,
-  FALLBACK_SETTING_READ_KEYS,
   BLOCKED_SETTING_KEYS,
+  BLOCKED_SETTING_PREFIXES,
+  BLOCKED_SETTING_SUBSTRINGS,
+  isBlockedSettingKey,
   WHEN_CONDITION_MIN_VERSION,
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
@@ -399,4 +145,7 @@ module.exports = {
   isMetadataDir,
   isMetadataFile,
   TOOL_TAB_ICON_NAME_RE,
+  LOOPBACK_HOSTS,
+  VALID_STABILITY_VALUES,
+  SPEC,
 }

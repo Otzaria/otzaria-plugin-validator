@@ -30,4 +30,4 @@ for (let i = 0; i < args.length; i++) {
 }
 if (positional[0]) process.env.INPUT_PATH = positional[0]
 
-require('./index')
+require('./action')

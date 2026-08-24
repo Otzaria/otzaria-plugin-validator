@@ -2,6 +2,7 @@
 
 const {
   KNOWN_UNDOCUMENTED_METHODS,
+  LOOPBACK_HOSTS,
   METHOD_REQUIRED_PERMISSION,
   RESERVED_HOLDER_FIELDS,
   BASELINE_PERMISSIONS,
@@ -105,18 +106,22 @@ function isTopBarSelector(selector) {
   return /top-?bar/i.test(selector)
 }
 
+// קבצים מגיעים כטקסט מהתיקייה וכ-Buffer מהארכיון — שני הצרכנים, אותה סריקה.
+const asText = (value) => (typeof value === 'string' ? value : value.toString('utf8'))
+
 function checkDesignCompliance(files) {
   const violations = []
   const cssChunks = []
   let sawAnyHtml = false
   let sawAnyCss = false
 
-  for (const [name, text] of files) {
+  for (const [name, raw] of files) {
     if (/\.css$/i.test(name)) {
       sawAnyCss = true
-      cssChunks.push({ name, css: text })
+      cssChunks.push({ name, css: asText(raw) })
     } else if (/\.html?$/i.test(name)) {
       sawAnyHtml = true
+      const text = asText(raw)
       const rootMatch = text.match(/<html\b([^>]*)>/i)
       if (rootMatch) {
         const attrs = rootMatch[1]
@@ -221,6 +226,167 @@ function checkDesignCompliance(files) {
   return { compliant: violations.length === 0, violations }
 }
 
+// ---- API / permission cross-checks (shared, severity-free) ------------------
+
+/**
+ * Scan the plugin's code and cross-check it against the spec and the declared
+ * permissions. Returns the findings BUCKETED BY KIND, with no severity of its
+ * own: the Action treats most of them as warnings, the store treats the
+ * baseline-permission bucket as a non-blocking advisory. Keeping the severity
+ * out here is what lets both consumers share one implementation.
+ *
+ * @param {object} args
+ * @param {object} args.manifest normalized manifest
+ * @param {Map<string,string|Buffer>} args.files relative name -> contents
+ * @param {{permissions:Set,apiMethods:Set,methodMinVersions:Map,methodPermissions:Map,events:Set}} args.spec
+ * @returns {object} buckets of `{message, ...}` findings
+ */
+function analyzeApiUsage({ manifest, files, spec }) {
+  const declared = new Set(manifest.permissions)
+  const undocumented = new Set(KNOWN_UNDOCUMENTED_METHODS)
+  const minAppVersion = manifest.minAppVersion
+
+  const apiUsage = new Map()
+  const eventUsage = new Map()
+  for (const [name, raw] of files) {
+    if (!isCodeLikeFile(name)) continue
+    let text
+    try {
+      text = asText(raw)
+    } catch (_e) {
+      continue
+    }
+    const { methods, events } = scanCodeForApiUsage(text)
+    for (const method of methods) {
+      if (!apiUsage.has(method)) apiUsage.set(method, new Set())
+      apiUsage.get(method).add(name)
+    }
+    for (const ev of events) {
+      if (!eventUsage.has(ev)) eventUsage.set(ev, new Set())
+      eventUsage.get(ev).add(name)
+    }
+  }
+
+  const unknownMethods = []
+  for (const [method, sources] of apiUsage) {
+    if (spec.apiMethods.has(method) || undocumented.has(method)) continue
+    unknownMethods.push({
+      method,
+      sources: [...sources],
+      message: `קריאה ל-API לא מוכר: ${method} (קבצים: ${[...sources].join(', ')})`,
+    })
+  }
+
+  const unknownEvents = []
+  for (const [event, sources] of eventUsage) {
+    if (spec.events.has(event)) continue
+    unknownEvents.push({
+      event,
+      sources: [...sources],
+      message: `רישום ל-event לא מוכר: ${event} (קבצים: ${[...sources].join(', ')})`,
+    })
+  }
+
+  const missingPermissions = []
+  for (const method of apiUsage.keys()) {
+    // המיפוי נגזר מהמפרט; המפה המובנית היא רצפה למקרה שהאחזור נכשל.
+    const permission =
+      (spec.methodPermissions && spec.methodPermissions.get(method)) ||
+      METHOD_REQUIRED_PERMISSION[method]
+    if (!permission) continue
+    // הרשאות בסיס ניתנות אוטומטית (אוצריא 0.9.97+) — אין צורך בהצהרה
+    if (BASELINE_PERMISSIONS.has(permission)) continue
+    if (declared.has(permission)) continue
+    // הצהרה ותיקה מכסה הרשאה שפוצלה ממנה (ui.feedback → fs.folder_access)
+    if (LEGACY_PERMISSION_ALIASES[permission] && declared.has(LEGACY_PERMISSION_ALIASES[permission])) continue
+    // קריאות רשת מסתפקות גם ב-network.localhost (שירות מקומי), לא רק ב-network.access
+    if (permission === 'network.access' && declared.has('network.localhost')) continue
+    missingPermissions.push({
+      method,
+      permission,
+      message: `התוסף משתמש ב-${method} אך לא ביקש את ההרשאה "${permission}" ב-manifest`,
+    })
+  }
+
+  // הרשאת בסיס שהוצהרה — מיותרת; מומלץ להסיר בהזדמנות.
+  const baselinePermissions = []
+  for (const permission of declared) {
+    if (!BASELINE_PERMISSIONS.has(permission)) continue
+    baselinePermissions.push({
+      permission,
+      message: `ההרשאה "${permission}" ניתנת כיום אוטומטית לכל תוסף — אפשר להסירה מה-manifest`,
+    })
+  }
+
+  // הרשאה מוצהרת חדשה מ-minAppVersion — אוצריא ישנה דוחה הרשאה לא מוכרת בהתקנה.
+  const permissionVersionErrors = []
+  for (const permission of declared) {
+    const since = PERMISSION_MIN_VERSION[permission]
+    if (!since) continue
+    try {
+      if (compareCoreVersions(since, minAppVersion) > 0) {
+        permissionVersionErrors.push({
+          permission,
+          since,
+          message:
+            `ההרשאה "${permission}" קיימת החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
+            `${minAppVersion}. עדכן את minAppVersion ל-${since} לפחות`,
+        })
+      }
+    } catch (_e) {
+      // invalid minAppVersion format — reported by validateManifestFields
+    }
+  }
+
+  // method חדש מ-minAppVersion יקרוס אצל משתמש בגרסה כזו.
+  // Mirrors PluginExtendedValidator._checkMethodVersions.
+  const methodVersionErrors = []
+  const minVersions = spec.methodMinVersions || new Map()
+  for (const [method, sources] of apiUsage) {
+    const since = minVersions.get(method)
+    if (!since) continue
+    try {
+      if (compareCoreVersions(since, minAppVersion) > 0) {
+        methodVersionErrors.push({
+          method,
+          since,
+          sources: [...sources],
+          message:
+            `התוסף משתמש ב-${method} הקיים החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
+            `${minAppVersion}. עדכן את minAppVersion ל-${since} לפחות (קבצים: ${[...sources].join(', ')})`,
+        })
+      }
+    } catch (_e) {
+      // invalid minAppVersion format — reported by validateManifestFields
+    }
+  }
+
+  const missingEventPermissions = []
+  for (const event of eventUsage.keys()) {
+    const permission = `events.subscribe:${event}`
+    if (!spec.permissions.has(permission)) continue // not a permission-gated event
+    if (BASELINE_PERMISSIONS.has(permission)) continue
+    if (declared.has(permission)) continue
+    missingEventPermissions.push({
+      event,
+      permission,
+      message: `רישום ל-event "${event}" דורש את ההרשאה "${permission}" שלא הוכרזה ב-manifest`,
+    })
+  }
+
+  return {
+    apiUsage,
+    eventUsage,
+    unknownMethods,
+    unknownEvents,
+    missingPermissions,
+    baselinePermissions,
+    permissionVersionErrors,
+    methodVersionErrors,
+    missingEventPermissions,
+  }
+}
+
 // ---- Extended validation entry point ----------------------------------------
 
 /**
@@ -238,7 +404,6 @@ function runExtendedValidation({ manifest, files, spec }) {
   const errors = []
   const warnings = []
   const declared = new Set(manifest.permissions)
-  const undocumented = new Set(KNOWN_UNDOCUMENTED_METHODS)
 
   // Network advisories (declarative field; never blocking).
   const networkRequested = manifest.networkEnabled || declared.has('network.access')
@@ -250,6 +415,9 @@ function runExtendedValidation({ manifest, files, spec }) {
       )
     } else {
       for (const raw of allowlist) {
+        // host מקומי ערום הוא מה שאוצריא עצמה מקבלת (isLoopbackHost
+        // ב-plugin_network_allowlist.dart) — אזהרה עליו היא אזהרת שקר.
+        if (typeof raw === 'string' && LOOPBACK_HOSTS.has(raw.trim().toLowerCase())) continue
         if (typeof raw !== 'string' || !/^https?:\/\//i.test(raw)) {
           warnings.push(`כתובת לא תקינה ב-network.allowlist: ${JSON.stringify(raw)} (מומלץ http(s) URL מלא)`)
         } else if (raw.includes('*')) {
@@ -262,97 +430,15 @@ function runExtendedValidation({ manifest, files, spec }) {
   // Blocking: a broken `when` on a startup contribution is rejected at install.
   for (const err of validateWhenConditions({ manifest, spec })) errors.push(err)
 
-  const apiUsage = new Map()
-  const eventUsage = new Map()
-  for (const [name, text] of files) {
-    if (!isCodeLikeFile(name)) continue
-    const { methods, events } = scanCodeForApiUsage(text)
-    for (const method of methods) {
-      if (!apiUsage.has(method)) apiUsage.set(method, new Set())
-      apiUsage.get(method).add(name)
-    }
-    for (const ev of events) {
-      if (!eventUsage.has(ev)) eventUsage.set(ev, new Set())
-      eventUsage.get(ev).add(name)
-    }
-  }
+  const usage = analyzeApiUsage({ manifest, files, spec })
 
-  for (const [method, sources] of apiUsage) {
-    if (spec.apiMethods.has(method) || undocumented.has(method)) continue
-    warnings.push(`קריאה ל-API לא מוכר: ${method} (קבצים: ${[...sources].join(', ')})`)
-  }
-
-  for (const [ev, sources] of eventUsage) {
-    if (spec.events.has(ev)) continue
-    warnings.push(`רישום ל-event לא מוכר: ${ev} (קבצים: ${[...sources].join(', ')})`)
-  }
-
-  for (const method of apiUsage.keys()) {
-    // המיפוי נגזר מהמסמך הרשמי; המפה המובנית היא רצפה למקרה שהאחזור נכשל.
-    const required =
-      (spec.methodPermissions && spec.methodPermissions.get(method)) ||
-      METHOD_REQUIRED_PERMISSION[method]
-    if (!required) continue
-    // הרשאות בסיס ניתנות אוטומטית (אוצריא 0.9.97+) — אין צורך בהצהרה
-    if (BASELINE_PERMISSIONS.has(required)) continue
-    if (declared.has(required)) continue
-    // הצהרה ותיקה מכסה הרשאה שפוצלה ממנה (ui.feedback → fs.folder_access)
-    if (LEGACY_PERMISSION_ALIASES[required] && declared.has(LEGACY_PERMISSION_ALIASES[required])) continue
-    // קריאות רשת מסתפקות גם ב-network.localhost (שירות מקומי), לא רק ב-network.access
-    if (required === 'network.access' && declared.has('network.localhost')) continue
-    warnings.push(`התוסף משתמש ב-${method} אך לא ביקש את ההרשאה "${required}" ב-manifest`)
-  }
-
-  // הרשאת בסיס שהוצהרה — מיותרת; מומלץ להסיר בהזדמנות.
-  for (const permission of declared) {
-    if (BASELINE_PERMISSIONS.has(permission)) {
-      warnings.push(`ההרשאה "${permission}" ניתנת כיום אוטומטית לכל תוסף — אפשר להסירה מה-manifest`)
-    }
-  }
-
-  // Blocking: a declared permission newer than minAppVersion — old Otzaria
-  // rejects unknown permissions at install time.
-  for (const permission of declared) {
-    const since = PERMISSION_MIN_VERSION[permission]
-    if (!since) continue
-    try {
-      if (compareCoreVersions(since, manifest.minAppVersion) > 0) {
-        errors.push(
-          `ההרשאה "${permission}" קיימת החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
-          `${manifest.minAppVersion}. עדכן את minAppVersion ל-${since} לפחות`
-        )
-      }
-    } catch (_e) {
-      // invalid minAppVersion format — reported by validateManifestFields
-    }
-  }
-
-  // Blocking: a method newer than the declared minAppVersion would crash for a
-  // user on that version. Mirrors PluginExtendedValidator._checkMethodVersions.
-  const minVersions = spec.methodMinVersions || new Map()
-  for (const [method, sources] of apiUsage) {
-    const since = minVersions.get(method)
-    if (!since) continue
-    try {
-      if (compareCoreVersions(since, manifest.minAppVersion) > 0) {
-        errors.push(
-          `התוסף משתמש ב-${method} הקיים החל מגרסה ${since}, אך minAppVersion שהוצהר הוא ` +
-          `${manifest.minAppVersion}. עדכן את minAppVersion ל-${since} לפחות (קבצים: ${[...sources].join(', ')})`
-        )
-      }
-    } catch (_e) {
-      // invalid minAppVersion format — reported by validateManifestFields
-    }
-  }
-
-  for (const ev of eventUsage.keys()) {
-    const eventPerm = `events.subscribe:${ev}`
-    if (!spec.permissions.has(eventPerm)) continue
-    if (BASELINE_PERMISSIONS.has(eventPerm)) continue
-    if (!declared.has(eventPerm)) {
-      warnings.push(`רישום ל-event "${ev}" דורש את ההרשאה "${eventPerm}" שלא הוכרזה ב-manifest`)
-    }
-  }
+  for (const f of usage.unknownMethods) warnings.push(f.message)
+  for (const f of usage.unknownEvents) warnings.push(f.message)
+  for (const f of usage.missingPermissions) warnings.push(f.message)
+  for (const f of usage.baselinePermissions) warnings.push(f.message)
+  for (const f of usage.permissionVersionErrors) errors.push(f.message)
+  for (const f of usage.methodVersionErrors) errors.push(f.message)
+  for (const f of usage.missingEventPermissions) warnings.push(f.message)
 
   let design = { compliant: false, violations: [] }
   try {
@@ -370,6 +456,7 @@ function runExtendedValidation({ manifest, files, spec }) {
 
 module.exports = {
   runExtendedValidation,
+  analyzeApiUsage,
   checkDesignCompliance,
   scanCodeForApiUsage,
   stripCommentsForScan,

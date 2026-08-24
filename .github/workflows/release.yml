@@ -41,6 +41,42 @@ jobs:
         if: steps.tag.outputs.exists == 'false'
         run: npm test
 
+      # האתר צורך את ראש תגית v1 בכל בנייה, ולכן הזזת התגית משנה מיד
+      # מה שהחנות מריצה. בלי השער הזה גרסה ששוברת את הבנייה של האתר
+      # מתגלה רק בפריסה הבאה שלו, אחרי ש-v1 כבר זזה. מאגר ציבורי —
+      # ה-checkout וההתקנה לא דורשים סוד.
+      - name: Checkout the website
+        if: steps.tag.outputs.exists == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: Otzaria/Otzaria_Website
+          path: website
+
+      - name: Setup Node.js for the website build
+        if: steps.tag.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install website dependencies
+        if: steps.tag.outputs.exists == 'false'
+        working-directory: website
+        run: npm ci --legacy-peer-deps
+
+      # מ-SHA של הריצה ולא מ-#v1: התגית טרם הוזזה בשלב הזה, והנקודה היא
+      # לבדוק את הקוד שעומד להפוך ל-v1, לא את זה שכבר שם.
+      - name: Install this commit as the website's validator
+        if: steps.tag.outputs.exists == 'false'
+        working-directory: website
+        run: npm install "github:Otzaria/otzaria-plugin-validator#${{ github.sha }}" --legacy-peer-deps --no-save
+
+      - name: Build the website
+        if: steps.tag.outputs.exists == 'false'
+        working-directory: website
+        run: npm run build
+
       - name: Create release and move major tag
         if: steps.tag.outputs.exists == 'false'
         env:
