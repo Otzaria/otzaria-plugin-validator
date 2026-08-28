@@ -12,6 +12,7 @@
     "bookmarks.read",
     "bookmarks.write",
     "calendar.read",
+    "clipboard.read",
     "database.read",
     "events.subscribe:calendar.city_changed",
     "events.subscribe:calendar.date_changed",
@@ -118,6 +119,7 @@
     "library.getLinkContent",
     "library.getLinkTargetsSummary",
     "library.getLinks",
+    "library.getRawLinks",
     "library.getTree",
     "library.listBookAltStructures",
     "library.listRecentBooks",
@@ -140,6 +142,7 @@
     "notifications.sendSystem",
     "notifications.showInApp",
     "plugin.backgroundDone",
+    "plugin.listInstalled",
     "plugin.openOther",
     "plugin.openSelf",
     "publishedData.listOwn",
@@ -193,7 +196,6 @@
     "ui.showWarning"
   ],
   "undocumentedApiMethods": [
-    "plugin.listInstalled",
     "plugin.requestInstall"
   ],
   "methodPermissions": {
@@ -238,6 +240,7 @@
     "library.getLinkContent": "library.content.read",
     "library.getLinkTargetsSummary": "library.links.read",
     "library.getLinks": "library.links.read",
+    "library.getRawLinks": "library.links.read",
     "library.getTree": "library.books.read",
     "library.listBookAltStructures": "library.content.read",
     "library.listRecentBooks": "library.books.read",
@@ -365,6 +368,7 @@
     "library.getLinkContent": "0.9.97",
     "library.getLinkTargetsSummary": "0.9.97",
     "library.getLinks": "0.9.97",
+    "library.getRawLinks": "0.9.97",
     "library.getTree": "0.9.93",
     "library.listBookAltStructures": "0.9.96",
     "library.listRecentBooks": "0.9.89",
@@ -387,6 +391,7 @@
     "notifications.sendSystem": "0.9.89",
     "notifications.showInApp": "0.9.89",
     "plugin.backgroundDone": "0.9.97",
+    "plugin.listInstalled": "0.9.97",
     "plugin.openOther": "0.9.97",
     "plugin.openSelf": "0.9.96",
     "publishedData.listOwn": "0.9.89",
