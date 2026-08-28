@@ -111,6 +111,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
     manifest,
     validPermissions: spec.permissions,
     methodPermissions: spec.methodPermissions,
+    apiMethods: spec.apiMethods,
     appVersion,
     skipAppVersionValidation: skipAppVersion,
   })) {

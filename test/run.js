@@ -1083,6 +1083,24 @@ test('validateManifestFields עם תת-קבוצת כללים מריץ אותם �
   }), /unknown manifest rule/)
 })
 
+test('הצהרה על קריאת API ב-permissions מקבלת הודעה לפי סוג הקריאה', () => {
+  const base = { id: 'com.test.perms', name: 'ok', version: '1.0.0', entrypoint: 'index.html' }
+  const run = (perm) => validateManifestFields({
+    manifest: buildManifest({ ...base, permissions: [perm] }),
+    validPermissions: spec.permissions,
+    methodPermissions: spec.methodPermissions,
+    apiMethods: spec.apiMethods,
+    rules: ['permissions'],
+  })
+
+  assert.deepEqual(run('feedback.report'), [
+    '"feedback.report" היא קריאת API ולא שם של הרשאה, והיא אינה דורשת הרשאה ' +
+      'במניפסט. הסירו אותה מ-permissions — הקריאה עצמה תמשיך לעבוד',
+  ])
+  assert.ok(run('network.fetch')[0].includes('האם התכוונת ל-"network.access"?'))
+  assert.ok(run('made.up.permission')[0].includes('הרשאה לא חוקית שנדרשת על ידי התוסף'))
+})
+
 test('analyzeApiUsage מחזיר ממצאים מקובצים ובלי חומרה, וקורא Buffer', () => {
   const { analyzeApiUsage } = require('../src/extendedValidator')
   const manifest = buildManifest({

@@ -1,6 +1,14 @@
 'use strict'
 
-const { METHOD_REQUIRED_PERMISSION, TOOL_TAB_ICON_NAME_RE } = require('./knownApi')
+const {
+  METHOD_REQUIRED_PERMISSION,
+  FALLBACK_API_METHODS,
+  TOOL_TAB_ICON_NAME_RE,
+} = require('./knownApi')
+
+// Methods whose boundary is enforced outside the manifest (a user dialog, a
+// chosen folder, the plugin's private root) carry no entry in methodPermissions.
+const FALLBACK_API_METHOD_SET = new Set(FALLBACK_API_METHODS)
 
 // דרגות היציבות המותרות בשדה stability (נגזר ל-status בחנות).
 const VALID_STABILITY_VALUES = new Set(['stable', 'beta', 'experimental'])
@@ -177,7 +185,8 @@ const MANIFEST_RULES = {
     }
   },
 
-  permissions({ manifest, errors, validPermissions, methodPermissions }) {
+  permissions({ manifest, errors, validPermissions, methodPermissions, apiMethods }) {
+    const known = apiMethods || FALLBACK_API_METHOD_SET
     for (const perm of manifest.permissions) {
       if (validPermissions.has(perm)) continue
       const hint =
@@ -185,6 +194,11 @@ const MANIFEST_RULES = {
         METHOD_REQUIRED_PERMISSION[perm]
       if (hint) {
         errors.push(`הרשאה לא חוקית: "${perm}". האם התכוונת ל-"${hint}"?`)
+      } else if (known.has(perm)) {
+        errors.push(
+          `"${perm}" היא קריאת API ולא שם של הרשאה, והיא אינה דורשת הרשאה ` +
+            `במניפסט. הסירו אותה מ-permissions — הקריאה עצמה תמשיך לעבוד`,
+        )
       } else {
         errors.push(`הרשאה לא חוקית שנדרשת על ידי התוסף: ${perm}`)
       }
@@ -235,6 +249,7 @@ function validateManifestFields({
   manifest,
   validPermissions,
   methodPermissions = null,
+  apiMethods = null,
   appVersion = null,
   skipAppVersionValidation = true,
   rules = ALL_MANIFEST_RULES,
@@ -245,6 +260,7 @@ function validateManifestFields({
     errors,
     validPermissions,
     methodPermissions,
+    apiMethods,
     appVersion,
     skipAppVersionValidation,
   }
