@@ -91,3 +91,19 @@ jobs:
           git tag -f "$MAJOR"
           git push -f origin "$MAJOR"
           gh release create "$VERSION" --title "$VERSION" --generate-notes
+
+      # התגית זזה, אבל האתר קולט אותה רק בבנייה הבאה שלו — וה-cron שלו מתעכב
+      # בפועל שעות. הדחיפה הזו פורסת מיד. הסוד הוא PAT עם contents:write על
+      # מאגר האתר; בלי סוד השלב מדלג, והאתר יתעדכן ב-cron כמו קודם.
+      - name: Trigger the website deploy
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::WEBSITE_DISPATCH_TOKEN לא הוגדר — מדלג. האתר יפרוס ב-cron שלו."
+            exit 0
+          fi
+          gh api repos/Otzaria/Otzaria_Website/dispatches \
+            -f event_type=validator-release \
+            -f "client_payload[version]=v${{ steps.v.outputs.version }}"
