@@ -11,7 +11,7 @@ const { buildManifest, validateManifestFields } = require('../src/manifestValida
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
-const { resolveUpdateFields, imageContentType, StoreClient } = require('../src/publish')
+const { resolveUpdateFields, imageContentType, StoreClient, retryConfig } = require('../src/publish')
 const { MARKER, buildCommentBody, replaceSummaryComment } = require('../src/prComment')
 const {
   buildFallbackSpec,
@@ -627,6 +627,46 @@ test('network-mocked scenarios (publish fallback + pr comment)', async () => {
       }),
       /HTTP 403.*Resource not accessible/
     )
+
+    // כשל רשת רגעי ("fetch failed" — בלי שום תגובת HTTP) מנוסה שוב ומצליח,
+    // ואילו תגובת HTTP שגויה שהתקבלה לא מנוסה שוב.
+    const origDelay = retryConfig.baseDelayMs
+    retryConfig.baseDelayMs = 1
+    try {
+      let netCalls = 0
+      global.fetch = async () => {
+        netCalls++
+        if (netCalls < 3) throw new TypeError('fetch failed')
+        return { ok: true, status: 200, headers: { getSetCookie: () => [] }, json: async () => ({ version: '1.0.0' }) }
+      }
+      const retryClient = new StoreClient('https://otzaria.org')
+      const retried = await retryClient.edit({ id: 'abc123', pluginFile: 'x', manifest: { version: '1.0.0' } })
+      assert.strictEqual(retried.skipped, true)
+      assert.strictEqual(netCalls, 3, 'two network failures then success')
+
+      // כשל רשת מתמשך — נזרק אחרי מיצוי הניסיונות, בלי לולאה אינסופית.
+      netCalls = 0
+      global.fetch = async () => { netCalls++; throw new TypeError('fetch failed') }
+      await assert.rejects(
+        new StoreClient('https://otzaria.org').edit({ id: 'abc123', pluginFile: 'x', manifest: { version: '1.0.0' } }),
+        /fetch failed/
+      )
+      assert.strictEqual(netCalls, retryConfig.attempts, 'exhausts the configured attempts')
+
+      // תגובת HTTP (גם 5xx) לא מנוסה שוב — מגיעה בקריאה אחת אל הקורא.
+      netCalls = 0
+      global.fetch = async () => {
+        netCalls++
+        return { ok: false, status: 502, headers: { getSetCookie: () => [] }, json: async () => ({}) }
+      }
+      await assert.rejects(
+        new StoreClient('https://otzaria.org').resolveId('com.example'),
+        /HTTP 502/
+      )
+      assert.strictEqual(netCalls, 1, 'an HTTP response is never retried')
+    } finally {
+      retryConfig.baseDelayMs = origDelay
+    }
   } finally {
     global.fetch = origFetch
   }

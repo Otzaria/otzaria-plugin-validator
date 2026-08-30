@@ -35,13 +35,30 @@ class CookieJar {
   }
 }
 
+// כשל רשת רגעי מול השרת (undici זורק TypeError "fetch failed" לפני שהתקבלה
+// תגובה כלשהי) הפיל ריצת פרסום שלמה מיד אחרי שהוולידציה עברה. לכן ניסיון חוזר
+// עם השהיה גדלה — אבל רק כשה-fetch עצמו נזרק: תגובת HTTP שהתקבלה, גם שגויה,
+// לעולם לא מנוסה שוב כאן (בזה מטפלים הקוראים), כדי לא לשלוח PUT פעמיים.
+const retryConfig = { attempts: 3, baseDelayMs: 2000 }
+
 async function fetchWithCookies(jar, url, options = {}) {
   const headers = { ...(options.headers || {}) }
   const cookie = jar.header()
   if (cookie) headers.cookie = cookie
-  const res = await fetch(url, { ...options, headers })
-  jar.store(res)
-  return res
+  let lastErr
+  for (let attempt = 1; attempt <= retryConfig.attempts; attempt++) {
+    try {
+      const res = await fetch(url, { ...options, headers })
+      jar.store(res)
+      return res
+    } catch (e) {
+      lastErr = e
+      if (attempt < retryConfig.attempts) {
+        await new Promise((r) => setTimeout(r, retryConfig.baseDelayMs * attempt))
+      }
+    }
+  }
+  throw lastErr
 }
 
 // Resolve the multipart text fields for the update PUT. Pure (no I/O) so it can
@@ -226,4 +243,4 @@ class StoreClient {
   }
 }
 
-module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar }
+module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar, retryConfig }
