@@ -9,8 +9,8 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       - run: npm test
@@ -18,8 +18,8 @@ jobs:
   spec-drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       # --require-live: ל-CI יש רשת, ולכן דילוג כאן משמעו תקלה — לא ירוק שקט.
@@ -30,7 +30,7 @@ jobs:
   self-test-valid:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate a known-good plugin
         uses: ./
         with:
@@ -39,7 +39,7 @@ jobs:
   self-test-invalid:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: A known-bad plugin must fail
         id: bad
         continue-on-error: true
