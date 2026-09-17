@@ -220,6 +220,10 @@ build/**
   עומק מעל 5, מעל 20 עלים, `key` ריק או ארוך מ‑128 תווים, שדה לא מוכר באיבר
   `activationEvents` (טעות כתיב כמו `wen`), עלה `setting` על הגדרה שתוספים אינם
   רשאים לקרוא, או `when` עם `minAppVersion` נמוך מ‑0.9.97. תוסף בלי `when` אינו נבדק.
+- תוסף ללא ממשק (`"headless": true`) שקובץ הכניסה שלו אינו `.js`, שאין לו דרך
+  להתעורר (`activationEvents`, או פקד/פריט תפריט שמפעילים את התוסף), שאינו מבקש
+  `app.run_on_startup`, שמצהיר על `contributes.toolTab` / `contributes.background.entrypoint`
+  / `openPlugin` / `openPluginOnSubmit`, או עם `minAppVersion` נמוך מ‑0.9.98.
 - (אופציונלי, עם `app-version`) אי‑תאימות `minAppVersion`/`maxAppVersion`.
 
 **אזהרות** (מוצגות; מפילות רק עם `fail-on-warnings` — זהה ל‑`PluginExtendedValidator`):
