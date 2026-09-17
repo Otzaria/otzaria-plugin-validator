@@ -95,6 +95,7 @@ function buildManifest(json, { lenient = false } = {}) {
     version: requireString(json.version, 'version'),
     entrypoint: requireString(json.entrypoint, 'entrypoint'),
     backgroundEntrypoint: typeof background.entrypoint === 'string' ? background.entrypoint : null,
+    headless: json.headless === true,
     stability: typeof json.stability === 'string' ? json.stability : 'stable',
     minAppVersion: typeof json.minAppVersion === 'string' ? json.minAppVersion : '0.0.0',
     maxAppVersion: typeof json.maxAppVersion === 'string' ? json.maxAppVersion : null,
@@ -227,6 +228,21 @@ const MANIFEST_RULES = {
       if (required !== undefined && required !== null && typeof required !== 'boolean') {
         errors.push('השדה required ב-contributes.databaseSources חייב להיות bool')
       }
+    }
+  },
+
+  // תוסף ללא ממשק רץ כסקריפט בתוך מעטפת שאוצריא מייצרת — אין לו HTML משלו.
+  headless({ manifest, errors }) {
+    if (!manifest.headless) return
+    if (!/\.js$/i.test(manifest.entrypoint)) {
+      errors.push(
+        `בתוסף ללא ממשק (headless) קובץ הכניסה חייב להיות קובץ JS, ולא "${manifest.entrypoint}"`
+      )
+    }
+    if (manifest.backgroundEntrypoint != null) {
+      errors.push(
+        'תוסף ללא ממשק (headless) אינו יכול להצהיר על contributes.background.entrypoint — קובץ הכניסה עצמו רץ ברקע'
+      )
     }
   },
 

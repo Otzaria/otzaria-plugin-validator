@@ -16,6 +16,7 @@ const apiSpec = require('./apiSpec')
 const manifestValidator = require('./manifestValidator')
 const extendedValidator = require('./extendedValidator')
 const whenValidator = require('./whenValidator')
+const headlessValidator = require('./headlessValidator')
 const knownApi = require('./knownApi')
 const reachability = require('./reachability')
 const validatePlugin = require('./validatePlugin')
@@ -43,6 +44,10 @@ module.exports = {
   // --- contributes.startup `when` ---
   validateWhenConditions: whenValidator.validateWhenConditions,
   validateStartupWhenConditions: whenValidator.validateStartupWhenConditions,
+
+  // --- Headless plugins ---
+  validateHeadless: headlessValidator.validateHeadless,
+  hasBackgroundActivationTrigger: headlessValidator.hasBackgroundActivationTrigger,
 
   // --- Code scan, cross-checks, design ---
   analyzeApiUsage: extendedValidator.analyzeApiUsage,

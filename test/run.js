@@ -821,14 +821,14 @@ test('lifecycle events (suspended/resumed/page_opened) are known — no unknown-
   )
 })
 
-test('network.localhost satisfies network.fetch permission cross-check', () => {
+test('network.localhost satisfies network.fetchStream permission cross-check', () => {
   const files = (permissions) => ({
     'manifest.json': JSON.stringify({
       schemaVersion: 1, id: 'com.example.net', name: 'net', version: '1.0.0',
-      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions,
+      minAppVersion: '0.9.97', entrypoint: 'index.js', permissions,
       network: { allowlist: ['127.0.0.1'] },
     }),
-    'index.js': "Otzaria.call('network.fetch', { url: 'http://127.0.0.1:1234' })",
+    'index.js': "Otzaria.call('network.fetchStream', { url: 'http://127.0.0.1:1234' })",
   })
   const withLocalhost = warningsForZip(files(['network.localhost']))
   assert.ok(
@@ -837,7 +837,7 @@ test('network.localhost satisfies network.fetch permission cross-check', () => {
   )
   const withoutAny = warningsForZip(files([]))
   assert.ok(
-    withoutAny.warnings.some((w) => w.includes('network.fetch') && w.includes('network.access')),
+    withoutAny.warnings.some((w) => w.includes('network.fetchStream') && w.includes('network.access')),
     'missing-permission warning expected: ' + withoutAny.warnings.join(' | ')
   )
 })
@@ -1137,7 +1137,7 @@ test('הצהרה על קריאת API ב-permissions מקבלת הודעה לפי
     '"feedback.report" היא קריאת API ולא שם של הרשאה, והיא אינה דורשת הרשאה ' +
       'במניפסט. הסירו אותה מ-permissions — הקריאה עצמה תמשיך לעבוד',
   ])
-  assert.ok(run('network.fetch')[0].includes('האם התכוונת ל-"network.access"?'))
+  assert.ok(run('network.download')[0].includes('האם התכוונת ל-"network.access"?'))
   assert.ok(run('made.up.permission')[0].includes('הרשאה לא חוקית שנדרשת על ידי התוסף'))
 })
 
@@ -1165,6 +1165,81 @@ test('checkDesignCompliance קורא גם Buffer וגם מחרוזת', () => {
   const fromBuffer = checkDesignCompliance(new Map([['a.html', Buffer.from(html, 'utf8')]]))
   assert.deepEqual(fromBuffer, fromText)
   assert.equal(fromText.compliant, true)
+})
+
+// ---- headless ---------------------------------------------------------------
+
+function headlessPlugin(overrides = {}, files = {}) {
+  const manifest = {
+    schemaVersion: 1, id: 'com.example.headless', name: 'headless', version: '1.0.0',
+    minAppVersion: '0.9.98', entrypoint: 'main.js', headless: true,
+    permissions: ['app.startup_contributions', 'app.run_on_startup'],
+    contributes: { startup: { activationEvents: ['app.startup'] } },
+    ...overrides,
+  }
+  return warningsForZip({
+    'manifest.json': JSON.stringify(manifest),
+    'main.js': '// no api usage',
+    ...files,
+  })
+}
+
+test('headless: תוסף תקין עובר', () => {
+  const r = headlessPlugin()
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+})
+
+test('headless: קובץ כניסה שאינו JS נחסם', () => {
+  const r = headlessPlugin({ entrypoint: 'index.html' }, { 'index.html': '<html dir="rtl" lang="he"></html>' })
+  assert.ok(r.errors.some((e) => e.includes('חייב להיות קובץ JS')), r.errors.join(' | '))
+})
+
+test('headless: background.entrypoint נחסם', () => {
+  const r = headlessPlugin({
+    contributes: { background: { entrypoint: 'main.js' }, startup: { activationEvents: ['app.startup'] } },
+  })
+  assert.ok(r.errors.some((e) => e.includes('contributes.background.entrypoint')), r.errors.join(' | '))
+})
+
+test('headless: בלי דרך להתעורר נחסם', () => {
+  const r = headlessPlugin({ contributes: {} })
+  assert.ok(r.errors.some((e) => e.includes('אין שום דרך לפעול')), r.errors.join(' | '))
+})
+
+test('headless: פקד שפותח את הדף אינו נחשב דרך להתעורר, ו-openPlugin נחסם', () => {
+  const r = headlessPlugin({
+    permissions: ['app.startup_contributions', 'app.run_on_startup', 'reader.toolbar'],
+    contributes: { startup: { toolbarItems: [{ id: 'a', label: 'כלי', openPlugin: true }] } },
+  })
+  assert.ok(r.errors.some((e) => e.includes('אין שום דרך לפעול')), r.errors.join(' | '))
+  assert.ok(r.errors.some((e) => e.includes('openPlugin')), r.errors.join(' | '))
+})
+
+test('headless: בלי app.run_on_startup נחסם', () => {
+  const r = headlessPlugin({ permissions: ['app.startup_contributions'] })
+  assert.ok(r.errors.some((e) => e.includes('"app.run_on_startup"')), r.errors.join(' | '))
+})
+
+test('headless: contributes.toolTab ו-minAppVersion ישן נחסמים', () => {
+  const r = headlessPlugin({
+    minAppVersion: '0.9.97',
+    contributes: { toolTab: { title: 'headless' }, startup: { activationEvents: ['app.startup'] } },
+  })
+  assert.ok(r.errors.some((e) => e.includes('contributes.toolTab')), r.errors.join(' | '))
+  assert.ok(r.errors.some((e) => e.includes('0.9.98')), r.errors.join(' | '))
+})
+
+test('headless: ערך שאינו bool נחסם, ותוסף רגיל אינו מושפע', () => {
+  const bad = headlessPlugin({ headless: 'yes' })
+  assert.ok(bad.errors.some((e) => e.includes('השדה headless')), bad.errors.join(' | '))
+  const regular = warningsForZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.regular', name: 'regular', version: '1.0.0',
+      minAppVersion: '0.9.96', entrypoint: 'index.js', permissions: [],
+    }),
+    'index.js': '// no api usage',
+  })
+  assert.deepStrictEqual(regular.errors, [], regular.errors.join(' | '))
 })
 
 Promise.all(pending).then(() => {

@@ -62,6 +62,9 @@ function isBlockedSettingKey(key) {
 // contributes.startup `when` conditions exist from this version on.
 const WHEN_CONDITION_MIN_VERSION = SPEC.versions.whenCondition
 
+// Headless plugins (manifest `headless: true`) exist from this version on.
+const HEADLESS_MIN_VERSION = SPEC.versions.headless
+
 const FALLBACK_API_METHODS = [...SPEC.apiMethods]
 
 // Minimum Otzaria version each API was added in. A plugin that calls an API
@@ -134,6 +137,7 @@ module.exports = {
   BLOCKED_SETTING_SUBSTRINGS,
   isBlockedSettingKey,
   WHEN_CONDITION_MIN_VERSION,
+  HEADLESS_MIN_VERSION,
   FALLBACK_API_METHODS,
   FALLBACK_METHOD_MIN_VERSION,
   FALLBACK_EVENTS,
