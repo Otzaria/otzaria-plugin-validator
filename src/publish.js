@@ -109,6 +109,19 @@ function imageContentType(file) {
   return IMAGE_CONTENT_TYPES[ext] || 'application/octet-stream'
 }
 
+// מגבלת החנות (MAX_SCREENSHOTS באתר) — נבדקת כאן מראש כדי שהכשל יהיה ברור
+// ולא 400 גנרי אחרי שהקובץ כבר נבנה ונשלח.
+const MAX_SCREENSHOTS = 10
+
+function appendScreenshots(form, screenshots) {
+  if (screenshots.length > MAX_SCREENSHOTS) {
+    throw new Error(`יותר מדי צילומי מסך (${screenshots.length}) — החנות מקבלת עד ${MAX_SCREENSHOTS}`)
+  }
+  for (const shot of screenshots) {
+    form.append('screenshots', new Blob([fs.readFileSync(shot)], { type: imageContentType(shot) }), path.basename(shot))
+  }
+}
+
 // A logged-in store session. One login, reused for resolve/edit/upload across
 // any number of plugins. Mirrors the browser flow (no token API): CSRF →
 // NextAuth credentials login → session cookie. Depends on NextAuth internals.
@@ -168,7 +181,9 @@ class StoreClient {
 
   // Update an existing plugin (PUT edit). Skips if the store already has the
   // version (unless force). See resolveUpdateFields for the admin-sync logic.
-  async edit({ id, pluginFile, manifest, syncMetadata = true, force = false }) {
+  // screenshots: when non-empty, REPLACES all of the plugin's store screenshots
+  // (the store's edit route swaps the whole set; there is no per-image append).
+  async edit({ id, pluginFile, manifest, syncMetadata = true, force = false, screenshots = [] }) {
     let url = this.editUrl(id)
     let currentRes = await fetchWithCookies(this.jar, url)
     if (currentRes.status === 403) {
@@ -195,6 +210,8 @@ class StoreClient {
     const form = new FormData()
     for (const [k, v] of Object.entries(fields)) form.set(k, v)
     form.set('pluginFile', new Blob([fs.readFileSync(pluginFile)]), path.basename(pluginFile))
+    appendScreenshots(form, screenshots)
+    if (screenshots.length) this.log(`צילומי המסך בחנות יוחלפו ב-${screenshots.length} צילומים מהמאגר`)
 
     const putRes = await fetchWithCookies(this.jar, url, { method: 'PUT', body: form })
     const result = await putRes.json().catch(() => ({}))
@@ -213,8 +230,16 @@ class StoreClient {
   }
 
   // Create a new plugin (POST upload). The store requires at least one
-  // screenshot — provide screenshot file paths.
-  async upload({ pluginFile, manifest, description, screenshots = [], tags = [] }) {
+  // screenshot — provide screenshot file paths — and the developer's explicit
+  // consent to receive user bug reports by email (reportsConsent; the site
+  // rejects a new plugin without it). The consent must come from the caller
+  // (the reports-consent input), never defaulted on the developer's behalf.
+  async upload({ pluginFile, manifest, description, screenshots = [], tags = [], reportsConsent = false }) {
+    if (!reportsConsent) {
+      throw new Error(
+        "דחיפה ראשונה (יצירת תוסף חדש) מחייבת אישור קבלת דיווחים ממשתמשים למייל שלך — הוסף לשלב הפרסום את הקלט reports-consent: 'true'"
+      )
+    }
     if (!screenshots.length) {
       throw new Error('דחיפה ראשונה (יצירת תוסף חדש) מחייבת לפחות צילום מסך אחד — ספק אותו דרך הקלט screenshots')
     }
@@ -223,9 +248,8 @@ class StoreClient {
     form.set('pluginFile', new Blob([fs.readFileSync(pluginFile)]), path.basename(pluginFile))
     form.set('description', (description || raw.description || '').toString())
     form.set('tags', JSON.stringify(Array.isArray(tags) ? tags : []))
-    for (const shot of screenshots) {
-      form.append('screenshots', new Blob([fs.readFileSync(shot)], { type: imageContentType(shot) }), path.basename(shot))
-    }
+    form.set('reportsConsent', 'true')
+    appendScreenshots(form, screenshots)
 
     const res = await fetchWithCookies(this.jar, `${this.base}/api/plugins/upload`, { method: 'POST', body: form })
     const result = await res.json().catch(() => ({}))
@@ -243,4 +267,4 @@ class StoreClient {
   }
 }
 
-module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar, retryConfig }
+module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar, retryConfig, MAX_SCREENSHOTS }

@@ -23,6 +23,14 @@ jobs:
         with:
           otzaria-user: ${{ secrets.OTZARIA_USER }}
           otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
+          # First publish of a new plugin: the store requires your consent to
+          # receive user bug reports by email, and at least one screenshot.
+          reports-consent: 'true'
+          screenshots: |
+            screenshots/main.png
+            screenshots/settings.png
+          # Optional: also replace the store screenshots on every version update.
+          # update-screenshots: 'true'
 
       # Optional: read the version from manifest.json for the tag.
       - id: ver

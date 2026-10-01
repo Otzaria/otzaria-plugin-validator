@@ -11,7 +11,7 @@ const { buildManifest, validateManifestFields } = require('../src/manifestValida
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
-const { resolveUpdateFields, imageContentType, StoreClient, retryConfig } = require('../src/publish')
+const { resolveUpdateFields, imageContentType, StoreClient, retryConfig, MAX_SCREENSHOTS } = require('../src/publish')
 const { MARKER, buildCommentBody, replaceSummaryComment } = require('../src/prComment')
 const {
   buildFallbackSpec,
@@ -667,6 +667,68 @@ test('network-mocked scenarios (publish fallback + pr comment)', async () => {
     } finally {
       retryConfig.baseDelayMs = origDelay
     }
+
+    // צילומי מסך ואישור דיווחים — בודקים מה בדיוק נשלח בגוף ה-multipart.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-shots-'))
+    const pluginFile = path.join(tmp, 'p.otzplugin')
+    fs.writeFileSync(pluginFile, 'zip')
+    const shots = ['a.png', 'b.jpg', 'c.webp'].map((n) => {
+      const p = path.join(tmp, n)
+      fs.writeFileSync(p, n)
+      return p
+    })
+    const sent = []
+    global.fetch = async (url, opts) => {
+      const method = (opts && opts.method) || 'GET'
+      if (method !== 'GET') sent.push({ url: String(url), method, body: opts.body })
+      return {
+        ok: true,
+        status: 200,
+        headers: { getSetCookie: () => [] },
+        json: async () => (method === 'GET' ? { version: '1.0.0', tags: [] } : { plugin: { id: 'new1' } }),
+      }
+    }
+
+    // עדכון גרסה עם צילומים: כולם נשלחים, לפי הסדר ועם סוג התוכן הנכון.
+    await new StoreClient('https://otzaria.org').edit({
+      id: 'abc123', pluginFile, manifest: { version: '1.1.0' }, screenshots: shots,
+    })
+    const editShots = sent[0].body.getAll('screenshots')
+    assert.strictEqual(sent[0].method, 'PUT')
+    assert.deepStrictEqual(editShots.map((f) => f.name), ['a.png', 'b.jpg', 'c.webp'])
+    assert.deepStrictEqual(editShots.map((f) => f.type), ['image/png', 'image/jpeg', 'image/webp'])
+
+    // עדכון בלי צילומים: השדה לא נשלח כלל — הגלריה בחנות לא נוגעת.
+    sent.length = 0
+    await new StoreClient('https://otzaria.org').edit({ id: 'abc123', pluginFile, manifest: { version: '1.1.0' } })
+    assert.deepStrictEqual(sent[0].body.getAll('screenshots'), [])
+
+    // יותר מ-10 צילומים נדחים לפני השליחה.
+    sent.length = 0
+    await assert.rejects(
+      new StoreClient('https://otzaria.org').edit({
+        id: 'abc123', pluginFile, manifest: { version: '1.1.0' }, screenshots: Array(MAX_SCREENSHOTS + 1).fill(shots[0]),
+      }),
+      /יותר מדי צילומי מסך/
+    )
+    assert.strictEqual(sent.length, 0)
+
+    // יצירת תוסף חדש: בלי reportsConsent — נכשל מיד בהודעה שמפנה לקלט, בלי לשלוח כלום.
+    await assert.rejects(
+      new StoreClient('https://otzaria.org').upload({ pluginFile, manifest: { version: '1.0.0' }, screenshots: shots }),
+      /reports-consent/
+    )
+    assert.strictEqual(sent.length, 0)
+
+    // עם אישור: נשלח reportsConsent=true יחד עם כל הצילומים.
+    const created = await new StoreClient('https://otzaria.org').upload({
+      pluginFile, manifest: { version: '1.0.0' }, screenshots: shots, reportsConsent: true,
+    })
+    assert.strictEqual(created.storeId, 'new1')
+    assert.ok(sent[0].url.endsWith('/api/plugins/upload'))
+    assert.strictEqual(sent[0].body.get('reportsConsent'), 'true')
+    assert.strictEqual(sent[0].body.getAll('screenshots').length, 3)
+    fs.rmSync(tmp, { recursive: true, force: true })
   } finally {
     global.fetch = origFetch
   }

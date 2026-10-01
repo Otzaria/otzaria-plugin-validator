@@ -268,18 +268,20 @@ async function maybeBuild(validated, cache) {
 }
 
 // Resolve screenshot input paths (comma/newline separated), relative to the
-// plugin dir first, then the repo root. Used only for first-publish (create).
+// plugin dir first, then the repo root. Used on first publish (create), and on
+// updates when update-screenshots is on. A path found in neither place is
+// dropped with a warning rather than silently — on an update a typo would
+// otherwise replace the store gallery with fewer images than intended.
 function resolveScreenshots(raw, pluginRoot) {
-  return raw
-    .split(/[\n,]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((rel) => {
-      const inPlugin = path.resolve(pluginRoot, rel)
-      if (fs.existsSync(inPlugin)) return inPlugin
-      return path.resolve(process.cwd(), rel)
-    })
-    .filter((p) => fs.existsSync(p))
+  const found = []
+  for (const rel of raw.split(/[\n,]/).map((s) => s.trim()).filter(Boolean)) {
+    const inPlugin = path.resolve(pluginRoot, rel)
+    const inRepo = path.resolve(process.cwd(), rel)
+    if (fs.existsSync(inPlugin)) found.push(inPlugin)
+    else if (fs.existsSync(inRepo)) found.push(inRepo)
+    else ga.warning(`צילום המסך "${rel}" לא נמצא (לא בתיקיית התוסף ולא בשורש המאגר) — מדלג עליו`)
+  }
+  return found
 }
 
 // Build each plugin and publish it to the store — only when enabled (auto =
@@ -325,6 +327,8 @@ async function maybePublish(validated, buildCache) {
   const force = readBool('force', false)
   const description = readInput('description', '').trim()
   const screenshotsRaw = readInput('screenshots', '')
+  const reportsConsent = readBool('reports-consent', false)
+  const updateScreenshots = readBool('update-screenshots', false)
 
   const client = new StoreClient(baseUrl, (m) => ga.info(m))
   try {
@@ -355,10 +359,20 @@ async function maybePublish(validated, buildCache) {
 
       let res
       if (id) {
-        res = await client.edit({ id, pluginFile: built.path, manifest, syncMetadata, force })
+        // צילומי מסך בעדכון — רק באישור מפורש (update-screenshots), כי הם מחליפים
+        // את כל הגלריה בחנות: מי שהשאיר את הקלט screenshots מהדחיפה הראשונה
+        // וערך מאז את התמונות באתר לא יידרס בלי שביקש.
+        let screenshots = []
+        if (updateScreenshots) {
+          screenshots = resolveScreenshots(screenshotsRaw, source.root)
+          if (!screenshots.length) {
+            throw new Error('update-screenshots מופעל אך לא נמצא אף צילום מסך בקלט screenshots')
+          }
+        }
+        res = await client.edit({ id, pluginFile: built.path, manifest, syncMetadata, force, screenshots })
       } else {
         const screenshots = resolveScreenshots(screenshotsRaw, source.root)
-        res = await client.upload({ pluginFile: built.path, manifest, description, screenshots, tags: [] })
+        res = await client.upload({ pluginFile: built.path, manifest, description, screenshots, tags: [], reportsConsent })
         if (res.storeId) ga.info(`מזהה התוסף החדש בחנות: ${res.storeId}`)
       }
 

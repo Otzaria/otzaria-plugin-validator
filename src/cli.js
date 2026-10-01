@@ -17,13 +17,16 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--otzaria-plugin-id') process.env['INPUT_OTZARIA-PLUGIN-ID'] = args[++i] || ''
   else if (a === '--base-url') process.env['INPUT_BASE-URL'] = args[++i] || ''
   else if (a === '--screenshots') process.env.INPUT_SCREENSHOTS = args[++i] || ''
+  else if (a === '--reports-consent') process.env['INPUT_REPORTS-CONSENT'] = 'true'
+  else if (a === '--update-screenshots') process.env['INPUT_UPDATE-SCREENSHOTS'] = 'true'
   else if (a === '--description') process.env.INPUT_DESCRIPTION = args[++i] || ''
   else if (a === '--no-sync-metadata') process.env['INPUT_SYNC-METADATA'] = 'false'
   else if (a === '--force') process.env.INPUT_FORCE = 'true'
   else if (a === '-h' || a === '--help') {
     process.stdout.write(
       'Usage: node src/cli.js <path> [--fail-on-warnings] [--app-version X] [--api-reference-url U]\n' +
-      '       [--publish auto|true|false] [--otzaria-user U] [--otzaria-password P] [--otzaria-plugin-id ID] [--base-url URL]\n'
+      '       [--publish auto|true|false] [--otzaria-user U] [--otzaria-password P] [--otzaria-plugin-id ID] [--base-url URL]\n' +
+      '       [--screenshots a.png,b.png] [--update-screenshots] [--reports-consent] [--description D] [--no-sync-metadata] [--force]\n'
     )
     process.exit(0)
   } else positional.push(a)

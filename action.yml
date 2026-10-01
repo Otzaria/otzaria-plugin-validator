@@ -92,11 +92,30 @@ inputs:
     default: ''
   screenshots:
     description: >-
-      Screenshot file paths (comma/newline separated), relative to the plugin
-      directory or repo root. Required only on the FIRST publish of a new plugin
-      (the store mandates at least one screenshot to create a plugin).
+      Screenshot file paths (comma/newline separated, up to 10), relative to the
+      plugin directory or repo root. Required on the FIRST publish of a new
+      plugin (the store mandates at least one screenshot to create a plugin).
+      On later version updates they are sent only when update-screenshots is
+      'true'.
     required: false
     default: ''
+  update-screenshots:
+    description: >-
+      When 'true', every version update of an EXISTING plugin also REPLACES
+      all of its store screenshots with the files listed in screenshots (the
+      store swaps the whole gallery, in the listed order). Default 'false'
+      leaves the store screenshots untouched on updates, so images edited on
+      the site are never overwritten unasked.
+    required: false
+    default: 'false'
+  reports-consent:
+    description: >-
+      Set to 'true' to confirm that you agree to receive bug reports from users
+      to your store account email. The store requires this consent to create a
+      NEW plugin, so the first publish fails without it. Not needed for
+      updates of an existing plugin.
+    required: false
+    default: 'false'
   description:
     description: >-
       Long store description used only when creating a new plugin on first
