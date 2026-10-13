@@ -161,6 +161,7 @@ jobs:
 |---|---|
 | `passed` | `'true'` אם האימות עבר. |
 | `total-plugins` / `total-errors` / `total-warnings` | מונים. |
+| `platforms` | JSON של `{ "<id>": { "declared": [...] \| null, "inferred": [...] } }` לכל תוסף — הפלטפורמות שהוצהרו ב‑`platforms` (או `null`) מול אלה שהוסקו מהקוד. ראו "פלטפורמות נתמכות". |
 | `published` | `'true'` אם נדחף עדכון לחנות. |
 | `pending-approval` | `'true'` אם הדחיפה ממתינה לאישור מנהל — קורה רק ביצירת תוסף חדש (דחיפה ראשונה), לא בעדכון גרסה. |
 | `plugin-file` / `sha256` | נתיב ה‑`.otzplugin` שנבנה ו‑hash שלו. |
@@ -237,6 +238,9 @@ build/**
 - הרשאה שאינה ברשימת ההרשאות הרשמית (עם רמז לתיקון).
 - `contributes.databaseSources` ללא הרשאת `database.read`, או רשומות לא תקינות.
 - `toolTab.iconName` שאינו שם אייקון FluentUI 24px תקין.
+- `platforms` שהוצהר ואינו מערך לא‑ריק, ללא כפילויות, של ערכים מתוך
+  `windows`, `linux`, `macos`, `android`, `ios` (שדה חדש — ראו "פלטפורמות נתמכות";
+  אוצריא עצמה עדיין מתעלמת ממנו).
 - `entrypoint` שחורג מגבולות התיקייה, לא קיים, או יושב בתיקייה מוחרגת מאריזה.
 - הרשאה או API שקיימים רק בגרסה חדשה מ‑`minAppVersion` שהוצהר.
 - תנאי `when` פגום על תרומה ב‑`contributes.startup` (`toolbarItems`,
@@ -256,11 +260,53 @@ build/**
 - קריאה ל‑API לא מוכר, או רישום ל‑event לא מוכר.
 - שימוש ב‑method ללא ההרשאה הנדרשת, או event ללא `events.subscribe:*`.
 - `network.access`/`network.enabled` עם `network.allowlist` ריק או כתובות לא תקינות.
+- הצהרה ב‑`platforms` על פלטפורמה שבה קריאה לא‑מוגנת תיכשל (למשל `shortcut.create`
+  עם `android`).
+
+**הערות פלטפורמה** (notices; לעולם לא מפילות): המלצה להצהיר `platforms` כשהקוד מוגבל
+בפועל, והערות על מתודות שעובדות חלקית (`fonts.listInstalled` וכו').
 
 **הערות עיצוב** (notices; לעולם לא מפילות — לפי `DESIGN_GUIDE.md`):
 
 - `<html>` ללא `dir="rtl"` / `lang="he"`, צבעי hex/rgb/שמות באנגלית מקודדים,
   `font-family`/`font-size`/`border-radius` מקודדים, או היעדר שימוש ב‑`var(--color-*)`.
+
+## פלטפורמות נתמכות (`platforms`)
+
+שדה מניפסט **אופציונלי** שמצהיר באילו מערכות הפעלה התוסף עובד. הערכים הם אלה
+שאוצריא מוסרת לתוסף ב‑`payload.app.platform` / `app.getInfo`:
+
+```json
+"platforms": ["windows", "linux", "macos"]
+```
+
+- **חסר** = לא הוצהר — התוסף נחשב מיועד לכל הפלטפורמות (כמו היום).
+- **הוצהר** = מערך לא‑ריק, ללא כפילויות, מתוך `windows`, `linux`, `macos`, `android`, `ios`.
+  ערך אחר חוסם.
+
+בנוסף, הוולידטור **מסיק** פלטפורמות מהקוד: אותה סריקה סטטית של
+`Otzaria.call('…')` שמשמשת להצלבת ההרשאות, מול מפת המגבלות ב‑`src/platforms.js`
+(כל רשומה מצטטת את המקום בקוד אוצריא). קריאה נחשבת **מוגנת** אם בקובץ שבו היא
+מופיעה יש בדיקת פלטפורמה (`payload.app.platform`, `app.getInfo`, `isDesktop()`
+וכדומה) — קריאה מוגנת אינה מגבילה את ההסקה.
+
+| מה בקוד | פלטפורמות | מקור באוצריא |
+|---|---|---|
+| `shortcut.create` | windows, linux, macos | `plugin_shortcut_service.dart` (`error.unsupported` בנייד) |
+| `ui.print`, `ui.exportPdf` | windows, linux, macos, ios | `plugin_print_service.dart` (`error.unsupported_platform` באנדרואיד) |
+| `import`/`export` בקובץ הכניסה של תוסף ללא ממשק | windows, macos | `plugin_asset_scheme.dart`, `README.md` של ה‑SDK |
+
+הערות בלבד (לא משנות את ההסקה): `shortcut.create` עם `location: 'startMenu'` —
+Windows בלבד; `fonts.listInstalled` מחזיר רשימה ריקה מחוץ ל‑Windows; PDF ב‑`<iframe>`
+מ‑`fs.pickUserFile` עובד רק ב‑Windows/macOS.
+
+התוצאה מוצגת בעמודת "פלטפורמות" בטבלת הסיכום (הוצהר מול מוסק) ובפלט `platforms`:
+
+- הוצהרה פלטפורמה שבה קריאה לא‑מוגנת תיכשל ← **אזהרה**.
+- לא הוצהר דבר והקוד מוגבל בפועל ← **notice** עם הצעה מוכנה להעתקה.
+
+זו היוריסטיקה: קריאה דינמית (`Otzaria.call(name)`) אינה מזוהה, ובדיקת פלטפורמה
+נבדקת ברמת הקובץ ולא ברמת הענף.
 
 ## הרצה מקומית
 

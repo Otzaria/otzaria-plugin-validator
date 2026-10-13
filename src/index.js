@@ -17,6 +17,7 @@ const manifestValidator = require('./manifestValidator')
 const extendedValidator = require('./extendedValidator')
 const whenValidator = require('./whenValidator')
 const headlessValidator = require('./headlessValidator')
+const platforms = require('./platforms')
 const knownApi = require('./knownApi')
 const reachability = require('./reachability')
 const validatePlugin = require('./validatePlugin')
@@ -48,6 +49,14 @@ module.exports = {
   // --- Headless plugins ---
   validateHeadless: headlessValidator.validateHeadless,
   hasBackgroundActivationTrigger: headlessValidator.hasBackgroundActivationTrigger,
+
+  // --- Supported platforms (manifest `platforms` + inference from code) ---
+  PLATFORMS: platforms.PLATFORMS,
+  DESKTOP_PLATFORMS: platforms.DESKTOP_PLATFORMS,
+  PLATFORM_LIMITED_METHODS: platforms.PLATFORM_LIMITED_METHODS,
+  validatePlatformsField: platforms.validatePlatformsField,
+  normalizePlatforms: platforms.normalizePlatforms,
+  analyzePlatforms: platforms.analyzePlatforms,
 
   // --- Code scan, cross-checks, design ---
   analyzeApiUsage: extendedValidator.analyzeApiUsage,

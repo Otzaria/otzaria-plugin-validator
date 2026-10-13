@@ -1304,6 +1304,167 @@ test('headless: ערך שאינו bool נחסם, ותוסף רגיל אינו מ
   assert.deepStrictEqual(regular.errors, [], regular.errors.join(' | '))
 })
 
+// ---- platforms ----------------------------------------------------------------
+
+const {
+  PLATFORMS,
+  PLATFORM_LIMITED_METHODS,
+  validatePlatformsField,
+  normalizePlatforms,
+  analyzePlatforms,
+  formatPlatformsCell,
+} = require('../src/platforms')
+
+function platformsPlugin(manifestOverrides = {}, code = '// no api usage', extraFiles = {}) {
+  return warningsForZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.plat', name: 'plat', version: '1.0.0',
+      minAppVersion: '0.9.98', entrypoint: 'index.js', permissions: [],
+      ...manifestOverrides,
+    }),
+    'index.js': code,
+    ...extraFiles,
+  })
+}
+
+test('platforms: שדה חסר תקין; ערכים חוקיים עוברים', () => {
+  assert.deepStrictEqual(validatePlatformsField(undefined), [])
+  assert.deepStrictEqual(validatePlatformsField(['windows', 'android']), [])
+  assert.deepStrictEqual(validatePlatformsField([...PLATFORMS]), [])
+})
+
+test('platforms: לא-מערך, ריק, ערך לא מוכר וכפילות נחסמים', () => {
+  assert.strictEqual(validatePlatformsField('windows').length, 1)
+  assert.ok(validatePlatformsField([])[0].includes('ריק'))
+  assert.ok(validatePlatformsField(['windows', 'win32'])[0].includes('"win32"'))
+  assert.ok(validatePlatformsField(['Windows'])[0].includes('"Windows"'))
+  assert.ok(validatePlatformsField([1])[0].includes('ערך לא חוקי'))
+  assert.ok(validatePlatformsField(['linux', 'linux'])[0].includes('פעמיים'))
+})
+
+test('platforms: normalizePlatforms מסדר, מסיר כפילויות וזבל, null כשאין', () => {
+  assert.deepStrictEqual(normalizePlatforms(['ios', 'windows', 'ios', 'x']), ['windows', 'ios'])
+  assert.strictEqual(normalizePlatforms(undefined), null)
+  assert.strictEqual(normalizePlatforms([]), null)
+  assert.strictEqual(normalizePlatforms('windows'), null)
+})
+
+test('platforms: כלל המניפסט חוסם ערך לא חוקי בתוסף מלא', () => {
+  const r = platformsPlugin({ platforms: ['windows', 'web'] })
+  assert.ok(r.errors.some((e) => e.includes('"web"')), r.errors.join(' | '))
+  const ok = platformsPlugin({ platforms: ['windows', 'linux'] })
+  assert.deepStrictEqual(ok.errors, [], ok.errors.join(' | '))
+  assert.deepStrictEqual(ok.platforms.declared, ['windows', 'linux'])
+})
+
+test('platforms: מפת המגבלות מכילה רק פלטפורמות חוקיות', () => {
+  for (const [method, info] of Object.entries(PLATFORM_LIMITED_METHODS)) {
+    assert.ok(info.platforms.length > 0, method)
+    for (const p of info.platforms) assert.ok(PLATFORMS.includes(p), `${method}: ${p}`)
+  }
+})
+
+test('platforms: בלי קריאות מוגבלות — מוסק כל הפלטפורמות, ללא המלצה', () => {
+  const r = platformsPlugin({}, "Otzaria.call('app.getTheme')")
+  assert.deepStrictEqual(r.platforms.inferred, [...PLATFORMS])
+  assert.strictEqual(r.platforms.suggestion, null)
+  assert.deepStrictEqual(r.platforms.mismatches, [])
+})
+
+test('platforms: shortcut.create לא-מוגן + הצהרה על android → אזהרה', () => {
+  const r = platformsPlugin(
+    { platforms: ['windows', 'android'] },
+    "document.querySelector('#b').onclick = () => Otzaria.call('shortcut.create', { label: 'x' })",
+  )
+  assert.deepStrictEqual(r.platforms.inferred, ['windows', 'linux', 'macos'])
+  assert.strictEqual(r.platforms.mismatches.length, 1)
+  assert.deepStrictEqual(r.platforms.mismatches[0].platforms, ['android'])
+  assert.ok(r.warnings.some((w) => w.includes('shortcut.create') && w.includes('android')), r.warnings.join(' | '))
+})
+
+test('platforms: קריאה מוגנת בבדיקת payload.app.platform אינה מגבילה ואינה מזהירה', () => {
+  const code = [
+    "let platform",
+    "Otzaria.on('plugin.boot', (payload) => { platform = payload.app.platform })",
+    "const isDesktop = () => ['windows', 'macos', 'linux'].includes(platform)",
+    "if (isDesktop()) Otzaria.call('shortcut.create', { label: 'x' })",
+  ].join('\n')
+  const r = platformsPlugin({ platforms: ['windows', 'android'] }, code)
+  assert.deepStrictEqual(r.platforms.mismatches, [])
+  assert.deepStrictEqual(r.platforms.inferred, [...PLATFORMS])
+  assert.ok(r.platforms.limited[0].guarded)
+})
+
+test('platforms: בדיקה שמופיעה רק בהערה אינה נחשבת הגנה', () => {
+  const r = platformsPlugin(
+    { platforms: ['android'] },
+    "// if (isDesktop())\nOtzaria.call('shortcut.create', { label: 'x' })",
+  )
+  assert.strictEqual(r.platforms.mismatches.length, 1)
+})
+
+test('platforms: בלי הצהרה + ui.print → המלצה (לא אזהרה)', () => {
+  const r = platformsPlugin({}, "Otzaria.call('ui.print')\nOtzaria.call('ui.exportPdf')")
+  assert.deepStrictEqual(r.platforms.inferred, ['windows', 'linux', 'macos', 'ios'])
+  assert.ok(r.platforms.suggestion)
+  assert.ok(r.platforms.suggestion.message.includes('"platforms"'))
+  assert.ok(!r.warnings.some((w) => w.includes('platforms')), r.warnings.join(' | '))
+})
+
+test('platforms: הצטברות מגבלות — חיתוך (shortcut.create ∩ ui.print = דסקטופ)', () => {
+  const r = platformsPlugin({}, "Otzaria.call('shortcut.create', {})\nOtzaria.call('ui.print')")
+  assert.deepStrictEqual(r.platforms.inferred, ['windows', 'linux', 'macos'])
+})
+
+test('platforms: הצהרה תואמת לקוד — אין אזהרה', () => {
+  const r = platformsPlugin({ platforms: ['windows', 'macos'] }, "Otzaria.call('shortcut.create', {})")
+  assert.deepStrictEqual(r.platforms.mismatches, [])
+  assert.strictEqual(r.platforms.suggestion, null)
+})
+
+test('platforms: הערות "degraded" (fonts.listInstalled) אינן משנות את ההסקה', () => {
+  const r = platformsPlugin({}, "Otzaria.call('fonts.listInstalled')")
+  assert.deepStrictEqual(r.platforms.inferred, [...PLATFORMS])
+  assert.ok(r.platforms.notes.some((n) => n.method === 'fonts.listInstalled'))
+})
+
+test('platforms: תוסף headless עם import סטטי מוגבל ל-windows/macos', () => {
+  const r = headlessPlugin({}, { 'main.js': "import { x } from './lib.js'\nx()" })
+  assert.deepStrictEqual(r.platforms.inferred, ['windows', 'macos'])
+  const bundled = headlessPlugin({}, { 'main.js': "const importer = 1 // import { x } from './lib.js'" })
+  assert.deepStrictEqual(bundled.platforms.inferred, [...PLATFORMS])
+})
+
+test('platforms: analyzePlatforms ישירות ותא הסיכום', () => {
+  const files = new Map([['a.js', "Otzaria.call('shortcut.create')"]])
+  const apiUsage = new Map([['shortcut.create', new Set(['a.js'])]])
+  const r = analyzePlatforms({ manifest: { platforms: ['ios'], entrypoint: 'a.js' }, files, apiUsage })
+  assert.strictEqual(r.mismatches.length, 1)
+  assert.ok(formatPlatformsCell(r).includes('הוצהר: ios'))
+  assert.ok(formatPlatformsCell(r).includes('⚠️'))
+  const none = analyzePlatforms({ manifest: { entrypoint: 'a.js' }, files: new Map(), apiUsage: new Map() })
+  assert.strictEqual(formatPlatformsCell(none), 'הוצהר: לא הוצהר · מוסק: כולן')
+  assert.strictEqual(formatPlatformsCell(null), '—')
+})
+
+test('platforms: buildManifest שומר את הערך הגולמי ומסמן declared', () => {
+  const m = buildManifest({ id: 'a', name: 'a', version: '1.0.0', entrypoint: 'i.html', platforms: ['linux'] })
+  assert.deepStrictEqual(m.platforms, ['linux'])
+  assert.strictEqual(m.declared.platforms, true)
+  const none = buildManifest({ id: 'a', name: 'a', version: '1.0.0', entrypoint: 'i.html' })
+  assert.strictEqual(none.platforms, undefined)
+  assert.strictEqual(none.declared.platforms, false)
+  assert.ok(validateManifestFields({ manifest: { ...m, platforms: [] }, validPermissions: new Set(), rules: ['platforms'] })[0].includes('ריק'))
+})
+
+test('platforms: הייצוא הציבורי (index.js) כולל את ה-API החדש', () => {
+  const pkg = require('../src/index')
+  assert.strictEqual(typeof pkg.analyzePlatforms, 'function')
+  assert.strictEqual(typeof pkg.validatePlatformsField, 'function')
+  assert.deepStrictEqual(pkg.PLATFORMS, PLATFORMS)
+  assert.ok(pkg.ALL_MANIFEST_RULES.includes('platforms'))
+})
+
 Promise.all(pending).then(() => {
   process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
   process.exit(failed > 0 ? 1 : 0)

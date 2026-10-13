@@ -9,6 +9,7 @@ const fs = require('fs')
 const { buildOtzplugin } = require('./zipWriter')
 const { StoreClient } = require('./publish')
 const { replaceSummaryComment } = require('./prComment')
+const { formatPlatformsCell } = require('./platforms')
 
 function readInput(name, fallback = '') {
   const key = `INPUT_${name.toUpperCase().replace(/ /g, '_')}`
@@ -82,6 +83,8 @@ async function main() {
   let totalDesign = 0
   const summaryRows = []
   const validated = []
+  // id -> { declared, inferred } — לפלט platforms של ה-Action.
+  const platformsOutput = {}
 
   for (const source of sources) {
     let report
@@ -91,7 +94,7 @@ async function main() {
       const file = workspaceRelative(source.file || source.root)
       ga.error(`כשל בקריאת התוסף: ${e.message}`, { file })
       totalErrors++
-      summaryRows.push({ name: file, errors: 1, warnings: 0, design: 0, status: '❌' })
+      summaryRows.push({ name: file, errors: 1, warnings: 0, design: 0, platforms: '—', status: '❌' })
       continue
     }
     validated.push({ source, report })
@@ -113,6 +116,13 @@ async function main() {
         { file, title: 'Otzaria unused files' }
       )
     }
+    if (report.platforms) {
+      const p = report.platforms
+      ga.info(`פלטפורמות — ${formatPlatformsCell(p)}`)
+      if (p.suggestion) ga.notice(p.suggestion.message, { file, title: 'Otzaria platforms' })
+      for (const n of p.notes) ga.notice(n.message, { file, title: 'Otzaria platforms' })
+      platformsOutput[report.manifest.id] = { declared: p.declared, inferred: p.inferred }
+    }
     if (report.errors.length === 0 && report.warnings.length === 0) {
       ga.info('✓ עבר ללא שגיאות ואזהרות.')
     }
@@ -130,6 +140,7 @@ async function main() {
       errors: report.errors.length,
       warnings: report.warnings.length,
       design: designCount,
+      platforms: formatPlatformsCell(report.platforms),
       status: report.errors.length > 0 ? '❌' : (report.warnings.length > 0 ? '⚠️' : '✅'),
     })
   }
@@ -137,9 +148,9 @@ async function main() {
   // Step summary.
   let md = '## תוצאות בדיקת תוספי אוצריא\n\n'
   md += `מקור מפרט ה-API: **${rawSpec.source === 'remote' ? 'GitHub (זמן אמת)' : 'fallback מובנה'}**\n\n`
-  md += '| תוסף | שגיאות | אזהרות | עיצוב | סטטוס |\n|---|---|---|---|---|\n'
+  md += '| תוסף | שגיאות | אזהרות | עיצוב | פלטפורמות | סטטוס |\n|---|---|---|---|---|---|\n'
   for (const r of summaryRows) {
-    md += `| ${r.name} | ${r.errors} | ${r.warnings} | ${r.design} | ${r.status} |\n`
+    md += `| ${r.name} | ${r.errors} | ${r.warnings} | ${r.design} | ${r.platforms} | ${r.status} |\n`
   }
   ga.summary(md)
   await maybePostPrComment(md)
@@ -147,6 +158,7 @@ async function main() {
   ga.setOutput('total-plugins', String(sources.length))
   ga.setOutput('total-errors', String(totalErrors))
   ga.setOutput('total-warnings', String(totalWarnings))
+  ga.setOutput('platforms', JSON.stringify(platformsOutput))
 
   const failed = totalErrors > 0 || (failOnWarnings && totalWarnings > 0)
   ga.setOutput('passed', failed ? 'false' : 'true')

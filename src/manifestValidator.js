@@ -5,6 +5,7 @@ const {
   FALLBACK_API_METHODS,
   TOOL_TAB_ICON_NAME_RE,
 } = require('./knownApi')
+const { validatePlatformsField } = require('./platforms')
 
 // Methods whose boundary is enforced outside the manifest (a user dialog, a
 // chosen folder, the plugin's private root) carry no entry in methodPermissions.
@@ -87,6 +88,7 @@ function buildManifest(json, { lenient = false } = {}) {
       name: typeof json.name === 'string',
       toolTabTitle: typeof toolTab.title === 'string',
       permissions: Array.isArray(json.permissions),
+      platforms: json.platforms !== undefined,
     },
     schemaVersion: json.schemaVersion === undefined ? 1 : json.schemaVersion,
     id: requireString(json.id, 'id'),
@@ -107,6 +109,9 @@ function buildManifest(json, { lenient = false } = {}) {
       : (typeof json.name === 'string' ? json.name : ''),
     toolTabIconName: typeof toolTab.iconName === 'string' ? toolTab.iconName : null,
     databaseSources: Array.isArray(contributes.databaseSources) ? contributes.databaseSources : [],
+    // הערך הגולמי (undefined = לא הוצהר) — הצורה נבדקת בכלל platforms, והנרמול
+    // ב-normalizePlatforms (src/platforms.js).
+    platforms: json.platforms,
     raw: json,
   }
 }
@@ -244,6 +249,12 @@ const MANIFEST_RULES = {
         'תוסף ללא ממשק (headless) אינו יכול להצהיר על contributes.background.entrypoint — קובץ הכניסה עצמו רץ ברקע'
       )
     }
+  },
+
+  // platforms אופציונלי; אם הוצהר — מערך לא-ריק וללא כפילויות מתוך
+  // windows/linux/macos/android/ios. ראו src/platforms.js.
+  platforms({ manifest, errors }) {
+    errors.push(...validatePlatformsField(manifest.platforms))
   },
 
   toolTabIcon({ manifest, errors }) {

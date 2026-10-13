@@ -12,6 +12,7 @@ const {
 const { compareCoreVersions } = require('./manifestValidator')
 const { validateWhenConditions } = require('./whenValidator')
 const { validateHeadless } = require('./headlessValidator')
+const { analyzePlatforms } = require('./platforms')
 
 const CODE_FILE_RE = /\.(?:js|mjs|cjs|html?|vue|svelte)$/i
 const STYLE_FILE_RE = /\.(?:css|html?)$/i
@@ -399,7 +400,7 @@ function analyzeApiUsage({ manifest, files, spec }) {
  * @param {object} args.manifest normalized manifest
  * @param {Map<string,string>} args.files map of relative name -> text contents
  * @param {{permissions:Set,apiMethods:Set,methodMinVersions:Map,events:Set}} args.spec merged API spec
- * @returns {{errors:string[], warnings:string[], design:{compliant:boolean,violations:string[]}}}
+ * @returns {{errors:string[], warnings:string[], design:{compliant:boolean,violations:string[]}, platforms:object}}
  */
 function runExtendedValidation({ manifest, files, spec }) {
   const errors = []
@@ -444,6 +445,15 @@ function runExtendedValidation({ manifest, files, spec }) {
   for (const f of usage.methodVersionErrors) errors.push(f.message)
   for (const f of usage.missingEventPermissions) warnings.push(f.message)
 
+  // פלטפורמות: הצהרה שסותרת קריאה לא-מוגנת היא אזהרה; ההמלצה וההערות — notice.
+  const platforms = analyzePlatforms({
+    manifest,
+    files,
+    apiUsage: usage.apiUsage,
+    stripComments: stripCommentsForScan,
+  })
+  for (const f of platforms.mismatches) warnings.push(f.message)
+
   let design = { compliant: false, violations: [] }
   try {
     const styleFiles = new Map()
@@ -455,7 +465,7 @@ function runExtendedValidation({ manifest, files, spec }) {
     // design scan is best-effort; never fatal
   }
 
-  return { errors, warnings, design }
+  return { errors, warnings, design, platforms }
 }
 
 module.exports = {

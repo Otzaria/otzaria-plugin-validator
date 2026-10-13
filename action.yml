@@ -160,6 +160,12 @@ outputs:
     description: 'Total blocking errors found across all plugins.'
   total-warnings:
     description: 'Total warnings found across all plugins.'
+  platforms:
+    description: >-
+      JSON object mapping each validated plugin id to its supported platforms:
+      { "<id>": { "declared": [...] | null, "inferred": [...] } }. "declared" is
+      the manifest "platforms" field (null when omitted); "inferred" comes from a
+      static scan of platform-limited SDK calls (see src/platforms.js).
   published:
     description: "'true' if an update was pushed to the store."
   pending-approval:

@@ -158,7 +158,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
     return { label, manifestFile, errors, warnings: [], design: null, manifest, unreferenced: [], missing: [] }
   }
 
-  const { errors: extErrors, warnings, design } = runExtendedValidation({ manifest, files: fileTexts, spec })
+  const { errors: extErrors, warnings, design, platforms } = runExtendedValidation({ manifest, files: fileTexts, spec })
   const { unreferenced, missing } = analyzeReachability({ allNames: allNames || [], texts: fileTexts, manifest })
   if (missing.length > 0) {
     warnings.push(
@@ -167,7 +167,7 @@ function validateCore({ label, manifestFile, collected, spec, appVersion, skipAp
         missing.join(', ')
     )
   }
-  return { label, manifestFile, errors: extErrors, warnings, design, manifest, unreferenced, missing }
+  return { label, manifestFile, errors: extErrors, warnings, design, manifest, unreferenced, missing, platforms }
 }
 
 function validateSource(source, opts) {
