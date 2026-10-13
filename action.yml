@@ -108,6 +108,36 @@ inputs:
       the site are never overwritten unasked.
     required: false
     default: 'false'
+  image:
+    description: >-
+      The plugin's store image (png/jpeg/webp/gif), relative to the plugin
+      directory or repo root. When empty, the manifest's "icon" is used, so a
+      plugin with an icon gets a store image with no extra setup. Sent on the
+      FIRST publish; on later updates only when update-image is 'true'.
+    required: false
+    default: ''
+  update-image:
+    description: >-
+      When 'true', every version update of an EXISTING plugin also REPLACES its
+      store image with image (or the manifest icon). Default 'false' leaves the
+      store image untouched, so an image edited on the site is not overwritten.
+    required: false
+    default: 'false'
+  description-file:
+    description: >-
+      Path to a plain-text file with the plugin's full store description (line
+      breaks are kept), relative to the plugin directory or repo root. Used on
+      the FIRST publish when description is empty; on later updates only when
+      update-description is 'true'.
+    required: false
+    default: ''
+  update-description:
+    description: >-
+      When 'true', every version update also REPLACES the full store description
+      with the contents of description-file. Default 'false' leaves a
+      description edited on the site untouched.
+    required: false
+    default: 'false'
   reports-consent:
     description: >-
       Set to 'true' to confirm that you agree to receive bug reports from users

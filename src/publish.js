@@ -122,6 +122,33 @@ function appendScreenshots(form, screenshots) {
   }
 }
 
+// תמונת התוסף בחנות (imageFile) — נפרדת מצילומי המסך. החנות מקבלת png/jpeg/webp/gif.
+function appendImage(form, image) {
+  if (!image) return
+  form.set('imageFile', new Blob([fs.readFileSync(image)], { type: imageContentType(image) }), path.basename(image))
+}
+
+/**
+ * בוחר את קובץ תמונת התוסף לחנות: הקלט image אם ניתן (יחסית לתיקיית התוסף ואז
+ * לשורש המאגר), ואחרת ה-icon שב-manifest — כך שתוסף עם אייקון מקבל תמונה בחנות
+ * בלי הגדרה נוספת. מחזיר { path } או { path: null, warning }.
+ */
+function pickStoreImage({ imageInput, pluginRoot, repoRoot, manifestIcon, exists = fs.existsSync }) {
+  const rel = (imageInput || '').trim()
+  const candidates = rel
+    ? [path.resolve(pluginRoot, rel), path.resolve(repoRoot, rel)]
+    : manifestIcon ? [path.resolve(pluginRoot, manifestIcon)] : []
+  if (!candidates.length) return { path: null }
+  const found = candidates.find((c) => exists(c))
+  if (!found) {
+    return { path: null, warning: rel ? `תמונת התוסף "${rel}" לא נמצאה (לא בתיקיית התוסף ולא בשורש המאגר) — מדלג עליה` : null }
+  }
+  if (!IMAGE_CONTENT_TYPES[path.extname(found).slice(1).toLowerCase()]) {
+    return { path: null, warning: `תמונת התוסף "${path.basename(found)}" אינה png/jpeg/webp/gif — מדלג עליה` }
+  }
+  return { path: found }
+}
+
 // A logged-in store session. One login, reused for resolve/edit/upload across
 // any number of plugins. Mirrors the browser flow (no token API): CSRF →
 // NextAuth credentials login → session cookie. Depends on NextAuth internals.
@@ -183,7 +210,9 @@ class StoreClient {
   // version (unless force). See resolveUpdateFields for the admin-sync logic.
   // screenshots: when non-empty, REPLACES all of the plugin's store screenshots
   // (the store's edit route swaps the whole set; there is no per-image append).
-  async edit({ id, pluginFile, manifest, syncMetadata = true, force = false, screenshots = [] }) {
+  // image: when set, REPLACES the plugin's store image (imageFile).
+  // description: when a string, REPLACES the plugin's long store description.
+  async edit({ id, pluginFile, manifest, syncMetadata = true, force = false, screenshots = [], image = null, description = null }) {
     let url = this.editUrl(id)
     let currentRes = await fetchWithCookies(this.jar, url)
     if (currentRes.status === 403) {
@@ -207,11 +236,17 @@ class StoreClient {
     }
 
     const fields = resolveUpdateFields({ manifest, current, syncMetadata })
+    if (typeof description === 'string' && description.trim()) {
+      fields.description = description.trim()
+      this.log('התיאור המלא בחנות יוחלף בתיאור מהמאגר')
+    }
     const form = new FormData()
     for (const [k, v] of Object.entries(fields)) form.set(k, v)
     form.set('pluginFile', new Blob([fs.readFileSync(pluginFile)]), path.basename(pluginFile))
     appendScreenshots(form, screenshots)
     if (screenshots.length) this.log(`צילומי המסך בחנות יוחלפו ב-${screenshots.length} צילומים מהמאגר`)
+    appendImage(form, image)
+    if (image) this.log(`תמונת התוסף בחנות תוחלף ב-${path.basename(image)}`)
 
     const putRes = await fetchWithCookies(this.jar, url, { method: 'PUT', body: form })
     const result = await putRes.json().catch(() => ({}))
@@ -234,7 +269,7 @@ class StoreClient {
   // consent to receive user bug reports by email (reportsConsent; the site
   // rejects a new plugin without it). The consent must come from the caller
   // (the reports-consent input), never defaulted on the developer's behalf.
-  async upload({ pluginFile, manifest, description, screenshots = [], tags = [], reportsConsent = false }) {
+  async upload({ pluginFile, manifest, description, screenshots = [], tags = [], reportsConsent = false, image = null }) {
     if (!reportsConsent) {
       throw new Error(
         "דחיפה ראשונה (יצירת תוסף חדש) מחייבת אישור קבלת דיווחים ממשתמשים למייל שלך — הוסף לשלב הפרסום את הקלט reports-consent: 'true'"
@@ -250,6 +285,7 @@ class StoreClient {
     form.set('tags', JSON.stringify(Array.isArray(tags) ? tags : []))
     form.set('reportsConsent', 'true')
     appendScreenshots(form, screenshots)
+    appendImage(form, image)
 
     const res = await fetchWithCookies(this.jar, `${this.base}/api/plugins/upload`, { method: 'POST', body: form })
     const result = await res.json().catch(() => ({}))
@@ -267,4 +303,4 @@ class StoreClient {
   }
 }
 
-module.exports = { StoreClient, resolveUpdateFields, imageContentType, CookieJar, retryConfig, MAX_SCREENSHOTS }
+module.exports = { StoreClient, resolveUpdateFields, imageContentType, pickStoreImage, CookieJar, retryConfig, MAX_SCREENSHOTS }

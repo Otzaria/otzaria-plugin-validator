@@ -11,7 +11,7 @@ const { buildManifest, validateManifestFields } = require('../src/manifestValida
 const { extractZipFiles } = require('../src/zip')
 const { buildOtzplugin } = require('../src/zipWriter')
 const { analyzeReachability } = require('../src/reachability')
-const { resolveUpdateFields, imageContentType, StoreClient, retryConfig, MAX_SCREENSHOTS } = require('../src/publish')
+const { resolveUpdateFields, imageContentType, pickStoreImage, StoreClient, retryConfig, MAX_SCREENSHOTS } = require('../src/publish')
 const { MARKER, buildCommentBody, replaceSummaryComment } = require('../src/prComment')
 const {
   buildFallbackSpec,
@@ -93,6 +93,24 @@ function makeStoredZip(files) {
 }
 
 process.stdout.write('Otzaria Plugin Validator — tests\n')
+
+test('pickStoreImage: קלט image, נפילה ל-icon שב-manifest, ואזהרות', () => {
+  const files = new Set(['/p/assets/icon.png', '/repo/store.webp', '/p/logo.svg'])
+  const exists = (f) => files.has(f)
+  const base = { pluginRoot: '/p', repoRoot: '/repo', exists }
+  assert.deepStrictEqual(pickStoreImage({ ...base, manifestIcon: 'assets/icon.png' }), { path: '/p/assets/icon.png' })
+  // קלט מפורש גובר על ה-icon, ונמצא גם בשורש המאגר
+  assert.deepStrictEqual(pickStoreImage({ ...base, imageInput: 'store.webp', manifestIcon: 'assets/icon.png' }), { path: '/repo/store.webp' })
+  assert.deepStrictEqual(pickStoreImage({ ...base }), { path: null })
+  const missing = pickStoreImage({ ...base, imageInput: 'nope.png' })
+  assert.strictEqual(missing.path, null)
+  assert.ok(/לא נמצאה/.test(missing.warning))
+  // icon חסר בדיסק — בלי אזהרה (ה-manifest validator כבר מדווח עליו)
+  assert.deepStrictEqual(pickStoreImage({ ...base, manifestIcon: 'gone.png' }), { path: null, warning: null })
+  const svg = pickStoreImage({ ...base, manifestIcon: 'logo.svg' })
+  assert.strictEqual(svg.path, null)
+  assert.ok(/png\/jpeg/.test(svg.warning))
+})
 
 test('valid plugin passes with no errors', () => {
   const r = validateSource({ kind: 'dir', root: fx('valid-plugin') }, opts)
@@ -702,6 +720,17 @@ test('network-mocked scenarios (publish fallback + pr comment)', async () => {
     sent.length = 0
     await new StoreClient('https://otzaria.org').edit({ id: 'abc123', pluginFile, manifest: { version: '1.1.0' } })
     assert.deepStrictEqual(sent[0].body.getAll('screenshots'), [])
+    // בלי description — התיאור הקיים בחנות נשמר (ב-GET המדומה אין תיאור → ריק)
+    assert.strictEqual(sent[0].body.get('description'), '')
+    assert.strictEqual(sent[0].body.get('imageFile'), null)
+
+    // עם description (update-description) — התיאור המלא מוחלף; ועם image — תמונת התוסף נשלחת
+    sent.length = 0
+    await new StoreClient('https://otzaria.org').edit({
+      id: 'abc123', pluginFile, manifest: { version: '1.1.0' }, description: 'שורה 1\nשורה 2', image: shots[0],
+    })
+    assert.strictEqual(sent[0].body.get('description'), 'שורה 1\nשורה 2')
+    assert.strictEqual(sent[0].body.get('imageFile').name, 'a.png')
 
     // יותר מ-10 צילומים נדחים לפני השליחה.
     sent.length = 0
