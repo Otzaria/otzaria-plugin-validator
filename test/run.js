@@ -1133,6 +1133,61 @@ test('מדיניות ההגדרות היא blocklist הנגזרת מהמפרט',
   }
 })
 
+// ---- Hotfix versions --------------------------------------------------------
+// גרסת תיקון של אוצריא היא רכיב רביעי, כמו ב-PluginVersionUtils באפליקציה.
+
+test('compareCoreVersions: רכיב ה-hotfix מסדר גרסאות תיקון', () => {
+  const { compareCoreVersions } = require('../src/manifestValidator')
+  assert.equal(compareCoreVersions('0.9.98.1', '0.9.98'), 1)
+  assert.equal(compareCoreVersions('0.9.98', '0.9.98.1'), -1)
+  assert.equal(compareCoreVersions('0.9.98.10', '0.9.98.9'), 1)
+  assert.equal(compareCoreVersions('0.9.98.99', '0.9.99'), -1)
+  assert.equal(compareCoreVersions('0.9.98.0', '0.9.98'), 0)
+  assert.equal(compareCoreVersions('0.9.98.1+801', '0.9.98.1'), 0)
+  assert.throws(() => compareCoreVersions('0.9.x', '0.9.98'))
+})
+
+test('appVersionRange: גרסת אפליקציה עם hotfix מול min/max', () => {
+  const errorsFor = (appVersion, minAppVersion, maxAppVersion) =>
+    validateManifestFields({
+      manifest: buildManifest({
+        schemaVersion: 1, id: 'com.example.hotfix', name: 'hotfix', version: '1.0.0',
+        entrypoint: 'index.html', minAppVersion, maxAppVersion,
+      }),
+      validPermissions: spec.permissions,
+      rules: ['appVersionRange'],
+      appVersion,
+      skipAppVersionValidation: false,
+    })
+  assert.equal(errorsFor('0.9.98', '0.9.98.1').length, 1)
+  assert.deepEqual(errorsFor('0.9.98.1', '0.9.98.1'), [])
+  assert.deepEqual(errorsFor('0.9.98.1', '0.9.98', '0.9.98.1'), [])
+  assert.equal(errorsFor('0.9.98.1', '0.9.98', '0.9.98').length, 1)
+})
+
+test('method שנוסף ב-hotfix מחייב minAppVersion עם רכיב ה-hotfix', () => {
+  const method = 'library.getBookDetails'
+  const hotfixSpec = {
+    ...spec,
+    methodMinVersions: new Map([...spec.methodMinVersions, [method, '0.9.98.1']]),
+  }
+  const run = (minAppVersion) => {
+    const buf = makeStoredZip({
+      'manifest.json': JSON.stringify({
+        schemaVersion: 1, id: 'com.example.hotfixapi', name: 'hotfixapi', version: '1.0.0',
+        minAppVersion, entrypoint: 'index.js', permissions: ['library.books.read'],
+      }),
+      'index.js': `Otzaria.call('${method}', {})`,
+    })
+    const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'otz-')), 'p.otzplugin')
+    fs.writeFileSync(tmp, buf)
+    return validateSource({ kind: 'zip', file: tmp }, { ...opts, spec: hotfixSpec })
+      .errors.filter((e) => e.includes(method))
+  }
+  assert.equal(run('0.9.98').length, 1)
+  assert.deepEqual(run('0.9.98.1'), [])
+})
+
 // ---- Public package API ------------------------------------------------------
 // החנות (Otzaria_Website) צורכת את החבילה דרך src/index.js. הבדיקות כאן הן
 // חוזה: שבירתן שוברת את החנות בבנייה הבאה, כי היא מרעננת את #v1 בכל בנייה.

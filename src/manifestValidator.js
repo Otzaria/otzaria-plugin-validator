@@ -13,7 +13,8 @@ const FALLBACK_API_METHOD_SET = new Set(FALLBACK_API_METHODS)
 // דרגות היציבות המותרות בשדה stability (נגזר ל-status בחנות).
 const VALID_STABILITY_VALUES = new Set(['stable', 'beta', 'experimental'])
 
-// Compare two versions by their core major.minor.patch, ignoring build/prerelease.
+// Compare two versions by every core segment (a missing one is 0), ignoring
+// build/prerelease. An Otzaria hotfix is a 4th segment: 0.9.98.1 > 0.9.98.
 // Port of PluginVersionUtils.compareCoreVersions.
 function parseCoreSegments(version) {
   const sanitized = String(version).split('+')[0].split('-')[0].trim()
@@ -28,7 +29,7 @@ function parseCoreSegments(version) {
 function compareCoreVersions(first, second) {
   const a = parseCoreSegments(first)
   const b = parseCoreSegments(second)
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = i < a.length ? a[i] : 0
     const y = i < b.length ? b[i] : 0
     if (x > y) return 1
