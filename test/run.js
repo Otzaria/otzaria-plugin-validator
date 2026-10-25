@@ -416,7 +416,7 @@ test('a bare loopback host is accepted in network.allowlist (as Otzaria accepts 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'otz-'))
   fs.writeFileSync(path.join(tmp, 'manifest.json'), JSON.stringify({
     schemaVersion: 1, id: 'com.x.y', name: 'y', version: '1.0.0', entrypoint: 'index.html',
-    minAppVersion: '0.9.95', permissions: ['network.access'],
+    minAppVersion: '0.9.95', permissions: ['network.access', 'network.localhost'],
     network: { enabled: true, allowlist: ['127.0.0.1', 'localhost', 'https://api.example.com'] },
     contributes: { toolTab: { title: 'y' } },
   }))
@@ -902,6 +902,80 @@ test('network.localhost satisfies network.fetchStream permission cross-check', (
     withoutAny.warnings.some((w) => w.includes('network.fetchStream') && w.includes('network.access')),
     'missing-permission warning expected: ' + withoutAny.warnings.join(' | ')
   )
+})
+
+// ---- network.access (internet) vs network.localhost (local) ----------------
+
+function networkReport(minAppVersion, permissions, allowlist, enabled = true) {
+  return warningsForZip({
+    'manifest.json': JSON.stringify({
+      schemaVersion: 1, id: 'com.example.net2', name: 'net2', version: '1.0.0',
+      minAppVersion, entrypoint: 'index.js', permissions,
+      network: { enabled, allowlist },
+    }),
+    'index.js': '// no api usage',
+  })
+}
+
+test('isLoopbackHost: 127.0.0.0-127.0.0.255, localhost and ::1 only', () => {
+  const { isLoopbackHost } = require('../src/index.js')
+  for (const host of ['localhost', 'LOCALHOST', '::1', '127.0.0.0', '127.0.0.1', '127.0.0.9', '127.0.0.255']) {
+    assert.ok(isLoopbackHost(host), host)
+  }
+  for (const host of [
+    '127.0.1.1', '127.10.10.1', '127.1', '127.0.0.01', '127.0.0.256', '127.0.0', '127.0.0.1.evil.com',
+    'localhost.', '0.0.0.0', '172.0.0.1', '192.168.1.1', '::ffff:127.0.0.1', 'example.com', '',
+  ]) {
+    assert.ok(!isLoopbackHost(host), host)
+  }
+})
+
+test('network: from minAppVersion 0.9.99 a local entry needs network.localhost (error)', () => {
+  const r = networkReport('0.9.99', ['network.access'], ['127.0.0.9'])
+  assert.ok(r.errors.some((e) => e.includes('network.localhost') && e.includes('127.0.0.9')), r.errors.join(' | '))
+})
+
+test('network: from minAppVersion 0.9.99 an internet entry needs network.access (error)', () => {
+  const r = networkReport('0.9.99', ['network.localhost'], ['https://api.example.com'])
+  assert.ok(r.errors.some((e) => e.includes('"network.access"') && e.includes('api.example.com')), r.errors.join(' | '))
+})
+
+test('network: both permissions with both kinds of entries are clean from 0.9.99', () => {
+  const r = networkReport('0.9.99', ['network.access', 'network.localhost'], ['127.0.0.1', 'http://127.0.0.9:36900', 'https://api.example.com'])
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+  assert.ok(!r.warnings.some((w) => w.includes('network.allowlist')), r.warnings.join(' | '))
+})
+
+test('network: below 0.9.99 the same mismatch is a warning, never an error', () => {
+  const local = networkReport('0.9.98', ['network.access'], ['127.0.0.9'])
+  assert.deepStrictEqual(local.errors, [], local.errors.join(' | '))
+  assert.ok(local.warnings.some((w) => w.includes('network.localhost') && w.includes('0.9.99')), local.warnings.join(' | '))
+  const remote = networkReport('0.9.98', ['network.localhost'], ['https://api.example.com'])
+  assert.deepStrictEqual(remote.errors, [], remote.errors.join(' | '))
+  assert.ok(remote.warnings.some((w) => w.includes('"network.access"')), remote.warnings.join(' | '))
+})
+
+test('network: a host that only starts with localhost/127 is internet, not "local-looking"', () => {
+  const r = networkReport('0.9.99', ['network.localhost'], ['https://localhost.example.com', 'https://127.0.0.1.nip.io'])
+  assert.strictEqual(r.errors.length, 1, r.errors.join(' | '))
+  assert.ok(r.errors[0].includes('localhost.example.com') && r.errors[0].includes('127.0.0.1.nip.io'))
+  assert.ok(!r.warnings.some((w) => w.includes('אינה מזוהה כמקומית')), r.warnings.join(' | '))
+})
+
+test('network: non-canonical local spellings get their own warning and are not counted as internet', () => {
+  const r = networkReport('0.9.99', ['network.localhost'], ['http://127.1:11434', 'http://127.10.10.1:80', 'http://localhost.:1234'])
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
+  assert.strictEqual(r.warnings.filter((w) => w.includes('אינה מזוהה כמקומית')).length, 3, r.warnings.join(' | '))
+})
+
+test('network: userinfo cannot disguise an internet host as local', () => {
+  const r = networkReport('0.9.99', ['network.localhost'], ['http://127.0.0.1@evil.example.com'])
+  assert.ok(r.errors.some((e) => e.includes('"network.access"')), r.errors.join(' | '))
+})
+
+test('network: no permission errors when network.enabled is off', () => {
+  const r = networkReport('0.9.99', ['network.access'], ['127.0.0.9'], false)
+  assert.deepStrictEqual(r.errors, [], r.errors.join(' | '))
 })
 
 test('ui.pickFolder without fs.folder_access emits a missing-permission warning', () => {

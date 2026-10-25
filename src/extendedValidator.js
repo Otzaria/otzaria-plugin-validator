@@ -2,7 +2,8 @@
 
 const {
   KNOWN_UNDOCUMENTED_METHODS,
-  LOOPBACK_HOSTS,
+  isLoopbackHost,
+  STRICT_NETWORK_PERMISSIONS_VERSION,
   METHOD_REQUIRED_PERMISSION,
   RESERVED_HOLDER_FIELDS,
   BASELINE_PERMISSIONS,
@@ -388,6 +389,126 @@ function analyzeApiUsage({ manifest, files, spec }) {
   }
 }
 
+// ---- Network ----------------------------------------------------------------
+
+// A host that looks local but is not in canonical form (127.1, 127.10.10.1,
+// `localhost.`). Otzaria treats it as internet. An ordinary hostname that merely
+// starts with `localhost` or `127` (localhost.example.com) is internet too.
+const LOCAL_LOOKING_RE = /^(localhost\.|127(\.\d+){1,3}\.?)$/i
+
+// Host of an http(s) URL as Dart's Uri.host reports it: userinfo and port
+// stripped, brackets removed from IPv6, percent-decoded, NOT canonicalized.
+// `new URL()` is deliberately not used — WHATWG rewrites 127.1 and 127.0.0.01
+// to 127.0.0.1, while Otzaria treats those spellings as internet.
+function hostOf(url) {
+  const match = /^https?:\/\/([^/?#]*)/i.exec(url)
+  if (!match) return ''
+  let authority = match[1]
+  const at = authority.lastIndexOf('@')
+  if (at >= 0) authority = authority.slice(at + 1)
+  let host
+  if (authority.startsWith('[')) {
+    const end = authority.indexOf(']')
+    host = end < 0 ? '' : authority.slice(1, end)
+  } else {
+    const colon = authority.indexOf(':')
+    host = colon >= 0 ? authority.slice(0, colon) : authority
+  }
+  try {
+    return decodeURIComponent(host)
+  } catch {
+    return host
+  }
+}
+
+function isStrictNetworkVersion(minAppVersion) {
+  try {
+    return compareCoreVersions(minAppVersion, STRICT_NETWORK_PERMISSIONS_VERSION) >= 0
+  } catch {
+    // An invalid minAppVersion is reported by the manifest validator.
+    return false
+  }
+}
+
+/**
+ * Port of PluginExtendedValidator._validateNetwork. Advisory (warnings) except
+ * for plugins that require 0.9.99 or later, where network.access (internet)
+ * and network.localhost (local services) are strictly separate: a destination
+ * without its own permission is blocked at runtime, so the mismatch is an error.
+ */
+function validateNetwork({ manifest, declared, errors, warnings }) {
+  const networkRequested =
+    manifest.networkEnabled || declared.has('network.access') || declared.has('network.localhost')
+  if (!networkRequested) return
+
+  const allowlist = manifest.networkAllowlist
+  if (!Array.isArray(allowlist) || allowlist.length === 0) {
+    warnings.push(
+      'התוסף מבקש גישת רשת (network.access / network.localhost / network.enabled) אך network.allowlist ריק. השדה הוא הצהרתי בלבד (התיעוד בפועל מוגדר באוצריא), אך מומלץ לפרט את הכתובות שבהן התוסף עושה שימוש לטובת שקיפות מול המשתמש'
+    )
+    return
+  }
+
+  const strictVersion = isStrictNetworkVersion(manifest.minAppVersion)
+  const localEntries = []
+  const remoteEntries = []
+  for (const raw of allowlist) {
+    if (typeof raw !== 'string') {
+      warnings.push(`כתובת לא תקינה ב-network.allowlist: ${JSON.stringify(raw)} (מומלץ http(s) URL מלא, או שם host מקומי כמו 127.0.0.1)`)
+      continue
+    }
+    const trimmed = raw.trim()
+    // A bare local host is what Otzaria itself accepts (isLoopbackHost in
+    // plugin_network_allowlist.dart); it allows any port on that address.
+    if (isLoopbackHost(trimmed)) {
+      localEntries.push(trimmed)
+      continue
+    }
+    if (!/^https?:\/\//i.test(trimmed)) {
+      warnings.push(`כתובת לא תקינה ב-network.allowlist: ${JSON.stringify(raw)} (מומלץ http(s) URL מלא, או שם host מקומי כמו 127.0.0.1)`)
+      continue
+    }
+    if (trimmed.includes('*')) warnings.push(`network.allowlist אינו תומך ב-wildcard: ${trimmed}`)
+    const host = hostOf(trimmed)
+    if (host === '') continue
+    if (isLoopbackHost(host)) {
+      localEntries.push(trimmed)
+    } else if (LOCAL_LOOKING_RE.test(host)) {
+      warnings.push(
+        `הכתובת ${trimmed} אינה מזוהה כמקומית — לשירות מקומי יש לכתוב localhost או 127.0.0.x בכתיבה עשרונית מלאה (למשל 127.0.0.1)`
+      )
+    } else {
+      remoteEntries.push(trimmed)
+    }
+  }
+
+  // A plugin whose network.enabled is off is blocked anyway; no point in warning
+  // about permissions.
+  if (strictVersion && manifest.networkEnabled !== true) return
+  const declaresLocal = declared.has('network.localhost')
+  const declaresRemote = declared.has('network.access')
+  const version = STRICT_NETWORK_PERMISSIONS_VERSION
+
+  if (localEntries.length > 0 && !declaresLocal) {
+    const what = `ה-network.allowlist כולל יעד מקומי (${localEntries.join(', ')}) אך ההרשאה "network.localhost" לא הוצהרה`
+    if (strictVersion) {
+      errors.push(`${what}. בתוסף שדורש אוצריא ${version} ומעלה "network.access" היא גישה לאינטרנט בלבד ואינה מכסה יעד מקומי`)
+    } else if (declaresRemote) {
+      warnings.push(`${what}. כרגע "network.access" מכסה אותו, אך מאוצריא ${version} הוא ייחסם — הצהר גם על "network.localhost"`)
+    } else {
+      warnings.push(`${what}, ולכן היעד המקומי ייחסם`)
+    }
+  }
+  if (remoteEntries.length > 0 && !declaresRemote) {
+    const what = `ה-network.allowlist כולל יעד אינטרנט (${remoteEntries.join(', ')}) אך ההרשאה "network.access" לא הוצהרה`
+    if (strictVersion) {
+      errors.push(`${what}. "network.localhost" היא גישה למחשב המקומי בלבד ואינה מתירה גישה לאינטרנט`)
+    } else {
+      warnings.push(`${what}. "network.localhost" היא גישה למחשב המקומי בלבד ואינה מתירה גישה לאינטרנט, ולכן היעד ייחסם`)
+    }
+  }
+}
+
 // ---- Extended validation entry point ----------------------------------------
 
 /**
@@ -406,27 +527,7 @@ function runExtendedValidation({ manifest, files, spec }) {
   const warnings = []
   const declared = new Set(manifest.permissions)
 
-  // Network advisories (declarative field; never blocking).
-  const networkRequested = manifest.networkEnabled || declared.has('network.access')
-  if (networkRequested) {
-    const allowlist = manifest.networkAllowlist
-    if (!Array.isArray(allowlist) || allowlist.length === 0) {
-      warnings.push(
-        'התוסף מבקש network.access או network.enabled אך network.allowlist ריק. השדה הוא הצהרתי בלבד (התיעוד בפועל מוגדר באוצריא), אך מומלץ לפרט את הכתובות שבהן התוסף עושה שימוש לטובת שקיפות מול המשתמש'
-      )
-    } else {
-      for (const raw of allowlist) {
-        // host מקומי ערום הוא מה שאוצריא עצמה מקבלת (isLoopbackHost
-        // ב-plugin_network_allowlist.dart) — אזהרה עליו היא אזהרת שקר.
-        if (typeof raw === 'string' && LOOPBACK_HOSTS.has(raw.trim().toLowerCase())) continue
-        if (typeof raw !== 'string' || !/^https?:\/\//i.test(raw)) {
-          warnings.push(`כתובת לא תקינה ב-network.allowlist: ${JSON.stringify(raw)} (מומלץ http(s) URL מלא)`)
-        } else if (raw.includes('*')) {
-          warnings.push(`network.allowlist אינו תומך ב-wildcard: ${raw}`)
-        }
-      }
-    }
-  }
+  validateNetwork({ manifest, declared, errors, warnings })
 
   // Blocking: a broken `when` on a startup contribution is rejected at install.
   for (const err of validateWhenConditions({ manifest, spec })) errors.push(err)

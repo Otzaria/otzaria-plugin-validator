@@ -123,9 +123,28 @@ function isMetadataFile(relName) {
 
 const TOOL_TAB_ICON_NAME_RE = /^[a-z0-9_]+_24_(regular|filled)$/
 
-// Bare hosts Otzaria accepts in network.allowlist without a scheme.
-// Mirrors _loopbackHosts in lib/plugins/models/plugin_network_allowlist.dart.
+// Hosts Otzaria treats as local (network.localhost) rather than internet
+// (network.access): `localhost`, `::1` and 127.0.0.0 - 127.0.0.255 in canonical
+// decimal form. Anything else (127.0.1.1, 127.1, 127.0.0.01, `localhost.`,
+// 192.168.x.x, ...) is internet. Mirrors isLoopbackHost in
+// lib/plugins/models/plugin_network_allowlist.dart.
+const LOOPBACK_HOST_NAMES = new Set(['localhost', '::1'])
+const IPV4_LOOPBACK_RE = /^127\.0\.0\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/
+
+function isLoopbackHost(host) {
+  const normalized = String(host).toLowerCase()
+  return LOOPBACK_HOST_NAMES.has(normalized) || IPV4_LOOPBACK_RE.test(normalized)
+}
+
+/** @deprecated names only; the 127.0.0.x range is not in this set. Use isLoopbackHost. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
+// From this Otzaria version network.access (internet) and network.localhost
+// (local services) are strictly separate. A plugin whose minAppVersion is at
+// least this must declare the permission that matches each allowlist entry.
+// Mirrors pluginStrictNetworkPermissionsVersion in
+// lib/plugins/models/plugin_network_permission_mode.dart.
+const STRICT_NETWORK_PERMISSIONS_VERSION = '0.9.99'
 
 module.exports = {
   FALLBACK_PERMISSIONS,
@@ -150,6 +169,8 @@ module.exports = {
   isMetadataFile,
   TOOL_TAB_ICON_NAME_RE,
   LOOPBACK_HOSTS,
+  isLoopbackHost,
+  STRICT_NETWORK_PERMISSIONS_VERSION,
   VALID_STABILITY_VALUES,
   SPEC,
 }

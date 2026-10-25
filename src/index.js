@@ -78,5 +78,7 @@ module.exports = {
   isMetadataFile: knownApi.isMetadataFile,
   TOOL_TAB_ICON_NAME_RE: knownApi.TOOL_TAB_ICON_NAME_RE,
   LOOPBACK_HOSTS: knownApi.LOOPBACK_HOSTS,
+  isLoopbackHost: knownApi.isLoopbackHost,
+  STRICT_NETWORK_PERMISSIONS_VERSION: knownApi.STRICT_NETWORK_PERMISSIONS_VERSION,
   VALID_STABILITY_VALUES: knownApi.VALID_STABILITY_VALUES,
 }

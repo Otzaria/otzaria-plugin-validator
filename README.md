@@ -249,12 +249,15 @@ build/**
   להתעורר (`activationEvents`, או פקד/פריט תפריט שמפעילים את התוסף), שאינו מבקש
   `app.run_on_startup`, שמצהיר על `contributes.toolTab` / `contributes.background.entrypoint`
   / `openPlugin` / `openPluginOnSubmit`, או עם `minAppVersion` נמוך מ‑0.9.98.
+- `minAppVersion` ‏0.9.99 ומעלה ו‑`network.allowlist` שאינו תואם להרשאות: כתובת מקומית (`localhost`, `::1`, `127.0.0.0`–`127.0.0.255`) בלי `network.localhost`, או כתובת אינטרנט בלי `network.access`. מאוצריא 0.9.99 שתי ההרשאות נפרדות לחלוטין. מתחת ל‑0.9.99 אותו אי‑התאמה היא אזהרה.
 - (אופציונלי, עם `app-version`) אי‑תאימות `minAppVersion`/`maxAppVersion`.
 
 **אזהרות** (מוצגות; מפילות רק עם `fail-on-warnings` — זהה ל‑`PluginExtendedValidator`):
 
 - קריאה ל‑API לא מוכר, או רישום ל‑event לא מוכר.
 - שימוש ב‑method ללא ההרשאה הנדרשת, או event ללא `events.subscribe:*`.
+- כתובת שנראית מקומית אך אינה בצורה קנונית (`127.1`, `127.10.10.1`, `localhost.`) — אוצריא רואה אותה כאינטרנט.
+- מתחת ל‑`minAppVersion` ‏0.9.99: כתובת מקומית עם `network.access` בלבד (או כתובת אינטרנט עם `network.localhost` בלבד), שתיחסם מאוצריא 0.9.99.
 - `network.access`/`network.enabled` עם `network.allowlist` ריק או כתובות לא תקינות.
 
 **הערות עיצוב** (notices; לעולם לא מפילות — לפי `DESIGN_GUIDE.md`):
